@@ -1,36 +1,29 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# My Gallery
 
-## Getting Started
+A responsive, frontend-only personal photo library prototype built with Next.js App Router, React, TypeScript, and Tailwind CSS.
 
-First, run the development server:
+## Run
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000. Use `npm run lint` and `npm run build` to check the project.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Structure
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `app/` contains the main routes: Photos, Trips and trip details, Albums, Favorites, Search, and library sections. `app/photo/[id]` is the immersive viewer route.
+- `components/shell.tsx` provides desktop navigation, mobile navigation, top search, storage status, and the upload preview action.
+- `components/gallery.tsx` provides the reusable photo grid and keyboard accessible viewer with filmstrip and information panel.
+- `components/cards.tsx`, `components/pages.tsx`, and `components/trip-detail.tsx` provide collection cards and page content.
+- `components/icons.tsx` contains small local SVG icons.
+- `lib/types.ts` defines Photo, Trip, and Album. `lib/mock-data.ts` supplies the demonstration records.
 
-## Learn More
+## Connecting a real library
 
-To learn more about Next.js, take a look at the following resources:
+Replace the exported arrays in `lib/mock-data.ts` with server-side data fetching at the route level, keeping the types in `lib/types.ts` as the UI contract. Add upload, favorite, tagging, and description API calls behind the existing controls. For large libraries, paginate timeline results and virtualize or incrementally load gallery sections.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+`Photo.thumbnailSrc` is used by grids and the filmstrip; `Photo.src` is used by the viewer. Point both to your NAS media endpoint, with separately generated thumbnail and display-size URLs. Add its host to `images.remotePatterns` in `next.config.ts`. Keep originals behind authenticated download endpoints when connecting a private library.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The current images are Unsplash development URLs. They need a network connection to display. Upload and collection creation are preview actions. Icons are local SVGs because the package registry was unavailable in the build environment.
