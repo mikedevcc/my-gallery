@@ -48,10 +48,20 @@ type ImageMetadata =
     ImageStringMetadata;
 
 
+type VideoMetadata = {
+    durationSeconds?: number;
+    frameRate?: number;
+    bitrate?: number;
+    videoCodec?: string;
+    audioCodec?: string;
+}
+
+
 type ImportedMedia = {
     file: MediaFileInfo;
     media: MediaMetadata;
     image?: ImageMetadata;
+    video?: VideoMetadata;
 };
 
 
@@ -69,6 +79,7 @@ function getNumber(
         ? value
         : undefined;
 }
+
 
 function getString(
     metadata: ExifData,
@@ -120,13 +131,33 @@ async function readMediaMetadataExif(
 
     let dateTaken: Date | undefined;
 
-    const raw = getString(metadata, "SubSecDateTimeOriginal");
+    const subSecDate = getString(metadata, "SubSecDateTimeOriginal");
+    const originalDate = getString(metadata, "DateTimeOriginal");
+    const createDate = getString(metadata, "CreateDate");
 
+    let raw: string | undefined;
+    let assumeUtc = false;
+
+    if (subSecDate !== undefined) {
+        raw = subSecDate;
+    }
+    else if (originalDate !== undefined) {
+        raw = originalDate;
+    }
+    else if (createDate !== undefined) {
+        raw = createDate;
+        assumeUtc = true;
+    }
+    
     if (raw !== undefined) {
-        const iso = raw.replace(
+        let iso = raw.replace(
             /^(\d{4}):(\d{2}):(\d{2}) /,
             "$1-$2-$3T"
         );
+
+        if (assumeUtc) {
+            iso += "Z";
+        }
 
         const parseDate = new Date(iso);
 
@@ -225,6 +256,22 @@ async function readImageExif(
 }
 
 
+async function readVideoExif(
+    filePath: string
+): Promise<VideoMetadata> {
+    const args = ["-json", "-n"];
+    const metadata = await runExifTool(filePath, args);
+
+    return {
+        durationSeconds: getNumber(metadata, "Duration"),
+        frameRate: getNumber(metadata, "VideoFrameRate"),
+        bitrate: getNumber(metadata, "AvgBitrate"),
+        videoCodec: getString(metadata, "CompressorID"),
+        audioCodec: getString(metadata, "AudioFormat"),
+    };
+}
+
+
 async function importMedia(
     filePath: string
 ): Promise<ImportedMedia> {
@@ -239,14 +286,20 @@ async function importMedia(
             mediaFileInfo.fileType === "IMAGE"
                 ? await readImageExif(absolutePath)
                 : undefined,
+        video:
+            mediaFileInfo.fileType === "VIDEO"
+            ? await readVideoExif(absolutePath)
+            : undefined
     }
 }
 
 
 async function main() {
-    const testFilePath = "../../../Pictures/IMG_20260922_200308.jpg";
+    const testImagePath = "../../../Pictures/IMG_20260922_200308.jpg";
+    const testVideoPath = "../../../Videos/VID_20260923_204043.mp4";
 
-    console.log(await importMedia(testFilePath));
+    console.log(await importMedia(testImagePath));
+    console.log(await importMedia(testVideoPath));
 }
 
 main();
