@@ -7,6 +7,9 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 
+type ExifData = Record<string, unknown>;
+
+
 type MediaFileInfo = {
     fileName: string;
     absolutePath: string;
@@ -16,23 +19,18 @@ type MediaFileInfo = {
 };
 
 
-type MediaDateInfo = {
+type MediaMetadata = {
     dateTaken?: Date;
-}
-
-
-type MediaInfo = 
-    MediaFileInfo &
-    MediaDateInfo
+    width?: number;
+    height?: number;
+    latitude?: number;
+    longitude?: number;
+};
 
 
 type ImageNumericMetadata = {
-    width?: number;
-    height?: number;
     iso?: number;
     aperture?: number;
-    latitude?: number;
-    longitude?: number;
     exposureTime?: number;
     focalLengthMm?: number;
     focalLength35mm?: number;
@@ -50,7 +48,11 @@ type ImageMetadata =
     ImageStringMetadata;
 
 
-type ExifData = Record<string, unknown>;
+type ImportedMedia = {
+    file: MediaFileInfo;
+    media: MediaMetadata;
+    image?: ImageMetadata;
+};
 
 
 const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".svg", ".heif", ".tiff", ".raw", ".webp", ".avif"];
@@ -80,14 +82,11 @@ function getString(
 }
 
 
-async function readDateExif(
-    filePath: string
-): Promise<MediaDateInfo> { 
-    const { stdout } = await execFileAsync("exiftool", [
-        "-json",
-        "-SubSecDateTimeOriginal",
-        filePath,
-    ]);
+async function runExifTool(
+    filePath: string,
+    args: string[]
+): Promise<ExifData> {
+    const { stdout } = await execFileAsync("exiftool", [...args, filePath]);
 
     const parsed: unknown = JSON.parse(stdout);
 
@@ -109,27 +108,39 @@ async function readDateExif(
         throw new Error("ExifTool metadata entry is not an object");
     }
 
-    const metadata = firstResult as ExifData;
+    return firstResult as ExifData;
+}
 
-    const raw = String(metadata["SubSecDateTimeOriginal"]);
 
-    if (raw === undefined) {
-        return {
-            dateTaken: undefined,
-        };
+async function readMediaMetadataExif(
+    filePath: string
+): Promise<MediaMetadata> {
+    const args = ["-json", "-n"];
+    const metadata = await runExifTool(filePath, args);
+
+    let dateTaken: Date | undefined;
+
+    const raw = getString(metadata, "SubSecDateTimeOriginal");
+
+    if (raw !== undefined) {
+        const iso = raw.replace(
+            /^(\d{4}):(\d{2}):(\d{2}) /,
+            "$1-$2-$3T"
+        );
+
+        const parseDate = new Date(iso);
+
+        if (!Number.isNaN(parseDate.getTime())) {
+            dateTaken = parseDate;
+        }
     }
 
-    const iso = raw.replace(
-        /^(\d{4}):(\d{2}):(\d{2}) /,
-        "$1-$2-$3T"
-    );
-
-    const dateTime = new Date(iso)
-
     return {
-        dateTaken: Number.isNaN(dateTime.getTime())
-        ? dateTime
-        : undefined,
+        dateTaken,
+        width: getNumber(metadata, "ImageWidth"),
+        height: getNumber(metadata, "ImageHeight"),
+        latitude: getNumber(metadata, "GPSLatitude"),
+        longitude: getNumber(metadata, "GPSLongitude"),
     }
 }
 
@@ -175,57 +186,15 @@ async function inspectMediaFile(
 }
 
 
-async function inspectMedia(
-    filePath: string
-): Promise<MediaInfo> {
-    const fileInfo = await inspectMediaFile(filePath);
-    const dateInfo = await readDateExif(fileInfo.absolutePath);
-
-    return {
-        ...fileInfo,
-        ...dateInfo,
-    };
-}
-
-
-async function readNumericExif(
+async function readImageNumericExif(
     filePath: string
 ): Promise<ImageNumericMetadata> {
-    const { stdout } = await execFileAsync("exiftool", [
-        "-json",
-        "-n",
-        filePath,
-    ]);
-
-    const parsed: unknown = JSON.parse(stdout);
-
-    if (!Array.isArray(parsed)) {
-        throw new Error("ExifTool returned invalid JSON structure");
-    }
-
-    if (parsed.length === 0) {
-        throw new Error("ExifTool returned no metadata");
-    }
-
-    const firstResult = parsed[0];
-
-    if (
-        typeof firstResult !== "object" ||
-        firstResult === null ||
-        Array.isArray(firstResult)
-    ) {
-        throw new Error("ExifTool metadata entry is not an object");
-    }
-
-    const metadata = firstResult as ExifData;
+    const args = ["-json", "-n"];
+    const metadata = await runExifTool(filePath, args);
 
     return {
-        width: getNumber(metadata, "ImageWidth"),
-        height: getNumber(metadata, "ImageHeight"),
         iso: getNumber(metadata, "ISO"),
         aperture: getNumber(metadata, "Aperture"),
-        latitude: getNumber(metadata, "GPSLatitude"),
-        longitude: getNumber(metadata, "GPSLongitude"),
         exposureTime: getNumber(metadata, "ExposureTime"),
         focalLengthMm: getNumber(metadata, "FocalLength"),
         focalLength35mm: getNumber(metadata, "FocalLengthIn35mmFormat"),
@@ -233,37 +202,11 @@ async function readNumericExif(
 }
 
 
-async function readStringExif(
+async function readImageStringExif(
     filePath: string
 ): Promise<ImageStringMetadata> {
-    const { stdout } = await execFileAsync("exiftool", [
-        "-json",
-        "-Flash",
-        "-WhiteBalance",
-        filePath,
-    ]);
-
-    const parsed: unknown = JSON.parse(stdout);
-
-    if (!Array.isArray(parsed)) {
-        throw new Error("ExifTool returned invalid JSON structure");
-    }
-
-    if (parsed.length === 0) {
-        throw new Error("ExifTool returned no metadata");
-    }
-
-    const firstResult = parsed[0];
-
-    if (
-        typeof firstResult !== "object" ||
-        firstResult === null ||
-        Array.isArray(firstResult)
-    ) {
-        throw new Error("ExifTool metadata entry is not an object");
-    }
-
-    const metadata = firstResult as ExifData;
+    const args = ["-json", "-Flash", "-WhiteBalance"];
+    const metadata = await runExifTool(filePath, args);
 
     return {
         flash: getString(metadata, "Flash"),
@@ -272,28 +215,38 @@ async function readStringExif(
 }
 
 
-async function readExif(
+async function readImageExif(
     filePath: string
 ): Promise<ImageMetadata> {
-    const imageNumericMetadata = await readNumericExif(filePath);
-    const imageStringMetadata = await readStringExif(filePath);
+    const imageNumericMetadata = await readImageNumericExif(filePath);
+    const imageStringMetadata = await readImageStringExif(filePath);
 
     return {...imageNumericMetadata, ...imageStringMetadata};
 }
 
 
-async function main() {
-    const media = await inspectMediaFile(
-        "../../../Pictures/IMG_20260922_200308.jpg"
-    );
+async function importMedia(
+    filePath: string
+): Promise<ImportedMedia> {
+    const mediaFileInfo = await inspectMediaFile(filePath);
 
-    const date = await readDateExif(media.absolutePath);
+    const absolutePath = mediaFileInfo.absolutePath;
     
-    console.log(date)
+    return {
+        file: mediaFileInfo,
+        media: await readMediaMetadataExif(absolutePath),
+        image: 
+            mediaFileInfo.fileType === "IMAGE"
+                ? await readImageExif(absolutePath)
+                : undefined,
+    }
+}
 
-    const metadata = await readExif(media.absolutePath);
 
-    console.log(metadata);
+async function main() {
+    const testFilePath = "../../../Pictures/IMG_20260922_200308.jpg";
+
+    console.log(await importMedia(testFilePath));
 }
 
 main();
