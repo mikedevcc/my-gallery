@@ -1,0 +1,50 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Photo {
+  id            String   @id @default(uuid())
+
+  filename      String
+  originalPath  String   @unique
+  thumbnailPath String?
+  previewPath   String?
+
+  mimeType      String
+  fileSizeBytes BigInt
+
+  width         Int
+  height        Int
+
+  dateTaken     DateTime?
+  dateImported  DateTime @default(now())
+
+  latitude      Float?
+  longitude     Float?
+  altitudeM     Float?
+
+  country       String?
+  region        String?
+  city          String?
+  locationName  String?
+
+  cameraMake    String?
+  cameraModel   String?
+
+  focalLengthMm   Float?
+  focalLength35mm Float?
+  aperture        Float?
+  iso             Int?
+  exposureTime    String?
+
+  flash         String?
+  whiteBalance  String?
+
+  favorite      Boolean @default(false)
+  description   String?
+}
