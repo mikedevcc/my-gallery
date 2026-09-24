@@ -4,7 +4,6 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { insertImportedMedia } from "./media-database"
 
 
 const execFileAsync = promisify(execFile);
@@ -295,24 +294,3 @@ export async function importMedia(
             : undefined
     }
 }
-
-
-async function main() {
-    console.log("DATABASE_URL loaded:", typeof process.env.DATABASE_URL);
-    // const testMediaPath = "../../../Pictures/IMG_20260922_200308.jpg";
-    const testMediaPath = "../../../Videos/VID_20260923_204043.mp4";
-
-    // console.log(await importMedia(testImagePath));
-    // console.log(await importMedia(testVideoPath));
-
-    const imported = await importMedia(testMediaPath);
-
-    console.log("Parsed media:");
-    console.log(imported);
-
-    const mediaId = await insertImportedMedia(imported);
-
-    console.log("Inserted media_id:", mediaId)
-}
-
-main();

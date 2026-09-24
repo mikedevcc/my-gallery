@@ -1,4 +1,4 @@
-import type { ImportedMedia } from "./import-media"
+import type { ImportedMedia } from "./media-import";
 import { Pool } from "pg";
 
 
@@ -10,6 +10,29 @@ type MediaIdRow = {
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
 });
+
+
+async function findMediaByPath(
+    absolutePath:string
+): Promise<MediaIdRow | undefined> {
+    const client = await pool.connect();
+
+    try {
+        const result = await client.query(
+            `SELECT media_id
+            FROM media
+            WHERE path = $1
+            LIMIT 1;`,
+            [absolutePath]
+        );
+
+        return result.rows[0];
+    }
+    finally {
+        client.release();
+    }
+}
+
 
 export async function insertImportedMedia(
     imported: ImportedMedia
@@ -41,11 +64,18 @@ export async function insertImportedMedia(
         longitude ?? null,
     ];
 
+    // Check for existing media at path
+    const existingMedia = await findMediaByPath(absolutePath);
+        
+    if (existingMedia !== undefined) {
+        throw new Error(`Media already exists with media_id: ${existingMedia.media_id} \nfor path ${absolutePath}`);
+    } 
+
     const client = await pool.connect();
 
     try {
         await client.query("BEGIN");
-
+        
         const result = await client.query<MediaIdRow>(
             `INSERT INTO media (
                 file_name,
@@ -71,7 +101,7 @@ export async function insertImportedMedia(
 
         if (imported.file.fileType === "IMAGE") {
             if (!imported.image) {
-                throw new Error("Image metadata is missing");
+                throw new Error("Image metadata is missing:");
             }
 
             const inImage = imported.image;
