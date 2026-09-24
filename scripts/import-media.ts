@@ -1,7 +1,10 @@
+import "dotenv/config";
+
 import path from "node:path";
 import fs from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { insertImportedMedia } from "./media-database"
 
 
 const execFileAsync = promisify(execFile);
@@ -57,7 +60,7 @@ type VideoMetadata = {
 }
 
 
-type ImportedMedia = {
+export type ImportedMedia = {
     file: MediaFileInfo;
     media: MediaMetadata;
     image?: ImageMetadata;
@@ -272,7 +275,7 @@ async function readVideoExif(
 }
 
 
-async function importMedia(
+export async function importMedia(
     filePath: string
 ): Promise<ImportedMedia> {
     const mediaFileInfo = await inspectMediaFile(filePath);
@@ -295,11 +298,21 @@ async function importMedia(
 
 
 async function main() {
-    const testImagePath = "../../../Pictures/IMG_20260922_200308.jpg";
-    const testVideoPath = "../../../Videos/VID_20260923_204043.mp4";
+    console.log("DATABASE_URL loaded:", typeof process.env.DATABASE_URL);
+    // const testMediaPath = "../../../Pictures/IMG_20260922_200308.jpg";
+    const testMediaPath = "../../../Videos/VID_20260923_204043.mp4";
 
-    console.log(await importMedia(testImagePath));
-    console.log(await importMedia(testVideoPath));
+    // console.log(await importMedia(testImagePath));
+    // console.log(await importMedia(testVideoPath));
+
+    const imported = await importMedia(testMediaPath);
+
+    console.log("Parsed media:");
+    console.log(imported);
+
+    const mediaId = await insertImportedMedia(imported);
+
+    console.log("Inserted media_id:", mediaId)
 }
 
 main();
