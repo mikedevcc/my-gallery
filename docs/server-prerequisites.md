@@ -1,0 +1,12 @@
+## Nominatim service
+- Dedicated Linux user: `nominatim`
+- Home: `/srv/nominatim`
+- Dedicated PostgreSQL role: `nominatim`
+- Python virtual environment: `/srv/nominatim/nominatim-venv`
+- Python packages:
+  - nominatim-db
+  - nominatim-api
+  - psycopg[binary]
+  - falcon
+  - uvicorn
+  - gunicorn

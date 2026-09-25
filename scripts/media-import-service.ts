@@ -9,19 +9,34 @@ import {
     stageMediaFile, 
     finalizeStagedMedia,
 } from "./media-storage";
+import { 
+    resolveLocation, 
+    type ResolvedLocation
+} from "./location"
 
 import fs from "node:fs/promises";
 
+
+
 export async function importMediaToLibrary(
-    sourcePath: string,
-    city: string,
+    sourcePath: string
 ): Promise<number> {
     let finalPath: string | undefined;
 
     try {
         const imported = await importMedia(sourcePath);
 
-        const destination = buildDestinationPath(imported, city);
+        const { latitude, longitude } = imported.media;
+
+        
+        let location: ResolvedLocation = {};
+
+        if (latitude !== undefined && longitude !== undefined) {
+            const resolvedLocation = await resolveLocation(latitude, longitude);
+            location = resolvedLocation
+        }
+
+        const destination = buildDestinationPath(imported, location.city);
 
         const staged = await stageMediaFile(imported.file.absolutePath);
 
@@ -35,7 +50,11 @@ export async function importMediaToLibrary(
             },
         };
         
-        const media_id =  await insertImportedMedia(storedImported);
+        const media_id =  await insertImportedMedia(
+            storedImported,
+            location.country,
+            location.city
+        );
 
         return media_id;
     }
@@ -55,7 +74,7 @@ export async function importMediaToLibrary(
 }
 
 async function main () {
-    const mediaId = await importMediaToLibrary("../../../Videos/VID_20260923_204043.mp4", "Singapore");
+    const mediaId = await importMediaToLibrary("../../../Videos/VID_20260923_204043.mp4");
     console.log(mediaId);
 }
 

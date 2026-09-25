@@ -1,9 +1,17 @@
 import type { ImportedMedia } from "./media-import";
-import { Pool } from "pg";
+import { Pool, PoolClient } from "pg";
 
 
 type MediaIdRow = {
     media_id: number;
+};
+
+type CountryIdRow = {
+    country_id: number;
+};
+
+type CityIdRow = {
+    city_id: number;
 };
 
 
@@ -13,29 +21,91 @@ const pool = new Pool({
 
 
 async function findMediaByPath(
+    client: PoolClient,
     absolutePath:string
 ): Promise<MediaIdRow | undefined> {
-    const client = await pool.connect();
+    const result = await client.query(
+        `SELECT media_id
+        FROM media
+        WHERE path = $1
+        LIMIT 1;`,
+        [absolutePath]
+    );
 
-    try {
-        const result = await client.query(
-            `SELECT media_id
-            FROM media
-            WHERE path = $1
-            LIMIT 1;`,
-            [absolutePath]
-        );
+    return result.rows[0];
+}
 
-        return result.rows[0];
+
+async function findOrCreateCountry(
+    client: PoolClient,
+    countryName: string
+): Promise<number> {
+    const result = await client.query<CountryIdRow>(
+        `SELECT country_id
+        FROM country
+        WHERE country_name = $1`,
+        [countryName]
+    );
+
+    const existing = result.rows[0];
+
+    if (existing !== undefined) {
+        return existing.country_id;
     }
-    finally {
-        client.release();
+
+    const insertResult = await client.query<CountryIdRow>(
+        `INSERT INTO country (country_name)
+        VALUES ($1)
+        ON CONFLICT (country_name)
+        DO UPDATE SET country_name = EXCLUDED.country_name
+        RETURNING country_id`,
+        [countryName],
+        
+    );
+    return insertResult.rows[0].country_id;
+}
+
+
+async function findOrCreateCity(
+    client: PoolClient,
+    cityName: string,
+    countryId: number
+): Promise<number> {
+    const result = await client.query<CityIdRow>(
+        `SELECT city_id
+        FROM city
+        WHERE city_name = $1
+            AND country_id = $2`,
+        [cityName, countryId]
+    );
+
+    const existing = result.rows[0];
+
+    if (existing !== undefined) {
+        return existing.city_id;
     }
+
+    const insertResult = await client.query<CityIdRow>(
+        `INSERT INTO city (
+            city_name,
+            country_id
+        )
+        VALUES ($1, $2)
+        ON CONFLICT (city_name, country_id)
+        DO UPDATE SET city_name = EXCLUDED.city_name
+        RETURNING city_id`,
+        [cityName, countryId],
+        
+    );
+
+    return insertResult.rows[0].city_id;
 }
 
 
 export async function insertImportedMedia(
-    imported: ImportedMedia
+    imported: ImportedMedia,
+    countryName?:string,
+    cityName?: string
 ): Promise<number> {
     const {
         fileName,
@@ -52,29 +122,45 @@ export async function insertImportedMedia(
         longitude,
     } = imported.media;
 
-    const values = [
-        fileName,
-        fileType,
-        fileSize,
-        absolutePath,
-        dateTaken ?? null,
-        width ?? null,
-        height ?? null,
-        latitude ?? null,
-        longitude ?? null,
-    ];
+    const client = await pool.connect();
 
     // Check for existing media at path
-    const existingMedia = await findMediaByPath(absolutePath);
+    const existingMedia = await findMediaByPath(client, absolutePath);
         
     if (existingMedia !== undefined) {
         throw new Error(`Media already exists with media_id: ${existingMedia.media_id} \nfor path ${absolutePath}`);
-    } 
-
-    const client = await pool.connect();
+    }
 
     try {
         await client.query("BEGIN");
+
+        let cityId: number | undefined;
+
+        if (cityName !== undefined && countryName === undefined) {
+            throw new Error("Cannot insert a city without a country");
+        }
+
+        if (countryName !== undefined) {
+            const countryId = await findOrCreateCountry(client, countryName);
+
+            if (cityName !== undefined) {
+                cityId = await findOrCreateCity(client, cityName, countryId);
+            }
+        }
+
+        const values = [
+            fileName,
+            fileType,
+            fileSize,
+            absolutePath,
+            dateTaken ?? null,
+            width ?? null,
+            height ?? null,
+            latitude ?? null,
+            longitude ?? null,
+            cityId ?? null,
+        ];
+
         
         const result = await client.query<MediaIdRow>(
             `INSERT INTO media (
@@ -86,9 +172,10 @@ export async function insertImportedMedia(
                 width,
                 height,
                 latitude,
-                longitude
+                longitude,
+                city_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING media_id`,
             values
         );
