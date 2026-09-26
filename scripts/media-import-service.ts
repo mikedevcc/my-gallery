@@ -12,7 +12,7 @@ import {
 import { 
     resolveLocation, 
     type ResolvedLocation
-} from "./location"
+} from "./media-location"
 
 import fs from "node:fs/promises";
 
