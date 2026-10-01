@@ -52,16 +52,35 @@ export function UploadControl() {
             />
 
             <div>
-                {conflicts.map((conflict) => (
-                    <button
-                        key={conflict.conflictId}
-                        type="button"
-                        onClick={() =>
-                            resolveConflict(conflict, "SKIP")
-                        }
-                    >
-                        Skip {conflict.type} conflict
-                    </button>
+                {conflicts.map(conflict => (
+                    <div key={conflict.conflictId}>
+                        <button
+                            type="button"
+                            onClick={() =>
+                                resolveConflict(conflict, "SKIP")
+                            }
+                        >
+                            Skip
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() =>
+                                resolveConflict(conflict, "KEEP_BOTH")
+                            }
+                        >
+                            Keep Both
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() =>
+                                resolveConflict(conflict, "REPLACE")
+                            }
+                        >
+                            Replace
+                        </button>
+                    </div>
                 ))}
             </div>
         </>

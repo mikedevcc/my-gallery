@@ -1,5 +1,4 @@
 import type { ConflictAction } from "@/lib/import/import-conflict";
-import { removeStagedConflict } from "@/scripts/media-storage";
 import { resolveStagedConflict } from "@/scripts/media-import-service";
 
 type ResolveConflictRequest = {
@@ -12,8 +11,6 @@ export async function POST(request: Request) {
 
     const { conflictId, action } = body;
 
-    resolveStagedConflict(conflictId, action)
-
     if (!conflictId || !action) {
         return Response.json(
             { error: "Missing conflictId or action" },
@@ -21,16 +18,10 @@ export async function POST(request: Request) {
         );
     }
 
-    if (action !== "SKIP") {
-        return Response.json(
-            { error: "Conflict action not implemented yet" },
-            { status: 400 }
-        );
-    }
+    const result = await resolveStagedConflict(
+        conflictId,
+        action
+    );
 
-    await removeStagedConflict(conflictId);
-
-    return Response.json({
-        type: "SKIPPED",
-    });
+    return Response.json(result);
 }

@@ -1,16 +1,19 @@
 import type { ConflictAction } from "./import-conflict";
 
 
-type ResolveConflictResponse = {
-    type?: "SKIPPED";
-    error?: string;
-};
-
+export type ResolveConflictResponse =
+    | {
+        type: "SKIPPED";
+    }
+    | {
+        type: "COMPLETED";
+        mediaId: number;
+    };
 
 export async function resolveImportConflict(
     conflictId: string,
     action: ConflictAction
-): Promise<void> {
+): Promise<ResolveConflictResponse> {
     const response = await fetch("/api/import/conflict", {
         method: "POST",
         headers: {
@@ -22,14 +25,16 @@ export async function resolveImportConflict(
         }),
     });
 
-    const data = await response.json() as ResolveConflictResponse;
+    const data = await response.json() as
+        ResolveConflictResponse | { error?: string };
 
     if (!response.ok) {
         throw new Error(
-            data.error ??
-            `Conflict resolution failed with status ${response.status}`
+            "error" in data && data.error
+                ? data.error
+                : "Failed to resolve import conflict"
         );
     }
 
-    
+    return data as ResolveConflictResponse;
 }

@@ -265,3 +265,141 @@ export async function insertImportedMedia(
         client.release();
     }
 }
+
+
+export async function updateImportedMedia(
+    mediaId: number,
+    imported: ImportedMedia,
+    countryName?: string,
+    cityName?: string
+): Promise<void> {
+    const {
+        fileName,
+        fileType,
+        fileSize,
+        absolutePath,
+    } = imported.file;
+
+    const {
+        dateTaken,
+        width,
+        height,
+        latitude,
+        longitude,
+    } = imported.media;
+    
+    const client = await pool.connect();
+
+    try {
+        await client.query("BEGIN");
+
+        let cityId: number | undefined;
+
+        if (cityName !== undefined && countryName === undefined) {
+            throw new Error("Cannot insert a city without a country");
+        }
+
+        if (countryName !== undefined) {
+            const countryId = await findOrCreateCountry(client, countryName);
+
+            if (cityName !== undefined) {
+                cityId = await findOrCreateCity(client, cityName, countryId);
+            }
+        }
+
+        const values = [
+            fileName,
+            fileType,
+            fileSize,
+            absolutePath,
+            dateTaken ?? null,
+            width ?? null,
+            height ?? null,
+            latitude ?? null,
+            longitude ?? null,
+            cityId ?? null,
+            mediaId
+        ];
+
+        await client.query(
+            `UPDATE media
+            SET file_name = $1,
+                file_type = $2,
+                file_size = $3,
+                path = $4,
+                date_taken = $5,
+                width = $6,
+                height = $7,
+                latitude = $8,
+                longitude = $9,
+                city_id = $10
+            WHERE media_id = $11`,
+            values
+        );
+
+        if (imported.file.fileType === "IMAGE") {
+            if (!imported.image) {
+                throw new Error("Image metadata is missing:");
+            }
+
+            const inImage = imported.image;
+
+            await client.query(
+                `UPDATE image
+                SET aperture = $2,
+                    iso = $3,
+                    exposure_time = $4,
+                    focal_length_mm =$5,
+                    focal_length_35mm = $6,
+                    flash = $7,
+                    white_balance = $8
+                WHERE media_id = $1`,
+                [
+                    mediaId,
+                    inImage.aperture ?? null,
+                    inImage.iso ?? null,
+                    inImage.exposureTime ?? null,
+                    inImage.focalLengthMm ?? null,
+                    inImage.focalLength35mm ?? null,
+                    inImage.flash ?? null,
+                    inImage.whiteBalance ?? null,
+
+                ]
+            );
+        }
+        else if (imported.file.fileType === "VIDEO") {
+            if (!imported.video) {
+                throw new Error("Video metadata is missing");
+            }
+
+            const inVideo = imported.video;
+
+            await client.query(
+                `UPDATE video
+                SET duration_seconds = $2,
+                    frame_rate = $3,
+                    video_codec = $4,
+                    audio_codec = $5,
+                    bitrate = $6
+                WHERE media_id = $1`,
+                [
+                    mediaId,
+                    inVideo.durationSeconds ?? null,
+                    inVideo.frameRate ?? null,
+                    inVideo.videoCodec ?? null,
+                    inVideo.audioCodec ?? null,
+                    inVideo.bitrate ?? null,
+                ]
+            );
+        }
+
+        await client.query("COMMIT");
+    }
+    catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+    }
+    finally {
+        client.release();
+    }
+}

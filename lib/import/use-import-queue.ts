@@ -47,35 +47,42 @@ export function useImportQueue() {
         conflict: ImportConflict,
         action: ConflictAction
     ): Promise<void> {
-        if (action !== "SKIP") {
-            return;
-        }
-
-        await resolveImportConflict(
+        const result = await resolveImportConflict(
             conflict.conflictId,
             action
         );
 
-        setConflicts((currentConflicts) =>
-            currentConflicts.filter(
-                (currentConflict) =>
-                    currentConflict.conflictId !== conflict.conflictId
+        setConflicts(current =>
+            current.filter(
+                item =>
+                    item.conflictId !== conflict.conflictId
             )
         );
 
-        setJobs((currentJobs) =>
-            currentJobs.map((job) =>
-                job.id === conflict.jobId
-                    ? {
+        setJobs(current =>
+            current.map(job => {
+                if (job.id !== conflict.jobId) {
+                    return job;
+                }
+
+                if (result.type === "SKIPPED") {
+                    return {
                         ...job,
                         status: "SKIPPED",
                         progress: 0,
-                    }
-                    : job
-            )
+                        error: undefined,
+                    };
+                }
+
+                return {
+                    ...job,
+                    status: "COMPLETED",
+                    progress: 100,
+                    error: undefined,
+                };
+            })
         );
     }
-
 
     async function startImport(files: File[]): Promise<void> {
         if (importingRef.current) {

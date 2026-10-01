@@ -9,6 +9,12 @@ import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import type { ImportedMedia } from "./media-import";
 
 
+export type ReplacementState = {
+    stagedPath: string;
+    destinationPath: string;
+    backupPath: string;
+};
+
 
 const storageRoot = "/home/mikef/Projects/temp_storage"
 
@@ -213,4 +219,108 @@ export async function removeStagedConflict(
         recursive: true,
         force: true,
     });
+}
+
+
+export async function findStagedConflictFile(
+    conflictId: string
+): Promise<string> {
+    // validate conflictId
+    const uuidPattern =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+    if (!uuidPattern.test(conflictId)) {
+        throw new Error("Invalid conflict ID");
+    }
+
+    // build .incoming/<conflictId>
+    const conflictDirectory = path.join(
+        storageRoot,
+        ".incoming",
+        conflictId
+    );
+
+    // inspect directory
+    const entries = await fs.readdir(
+        conflictDirectory,
+        { withFileTypes: true }
+    );
+
+    // make sure exactly one file exists
+    const files = entries.filter(
+        (entry) => entry.isFile()
+    )
+
+    if (files.length !== 1) {
+        throw new Error(
+            `Expected exactly one staged file, found ${files.length}`
+        );
+    }
+
+    // return its absolute path
+    return path.join(
+        conflictDirectory,
+        files[0].name
+    );
+}
+
+
+export async function beginMediaReplacement(
+    stagedPath: string,
+    destinationPath: string
+): Promise<ReplacementState> {
+    const backupPath = `${destinationPath}.backup-${randomUUID()}`;
+    
+    // move existing destination to backup
+    await fs.rename(
+        destinationPath,
+        backupPath
+    );
+
+    try {
+        // link staged file into destination
+        await fs.link(stagedPath, destinationPath);
+
+        return {
+            stagedPath,
+            destinationPath,
+            backupPath
+        }
+    }
+    catch (error) {
+        try {
+            await fs.rename(
+                backupPath,
+                destinationPath
+            );
+        }
+        catch (restoreError) {
+            console.error(
+                "Failed to restore original media after replacement failure:",
+                restoreError
+            );
+        }
+
+        throw error;
+    }
+}
+
+
+export async function commitMediaReplacement(
+    replacement: ReplacementState
+): Promise<void> {
+    await fs.unlink(replacement.stagedPath);
+    await fs.rm(replacement.backupPath, { force: true });
+}
+
+
+export async function rollbackMediaReplacement(
+    replacement: ReplacementState
+): Promise<void> {
+    await fs.rm(replacement.destinationPath, { force: true });
+
+    await fs.rename(
+        replacement.backupPath,
+        replacement.destinationPath
+    );
 }
