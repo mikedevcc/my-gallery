@@ -20,19 +20,25 @@ const pool = new Pool({
 });
 
 
-async function findMediaByPath(
-    client: PoolClient,
+export async function findMediaByPath(
     absolutePath:string
 ): Promise<MediaIdRow | undefined> {
-    const result = await client.query(
-        `SELECT media_id
-        FROM media
-        WHERE path = $1
-        LIMIT 1;`,
-        [absolutePath]
-    );
+    const client = await pool.connect();
 
-    return result.rows[0];
+    try {
+        const result = await client.query<MediaIdRow>(
+            `SELECT media_id
+             FROM media
+             WHERE path = $1
+             LIMIT 1`,
+            [absolutePath]
+        );
+
+        return result.rows[0];
+    }
+    finally {
+        client.release();
+    }
 }
 
 
@@ -125,7 +131,7 @@ export async function insertImportedMedia(
     const client = await pool.connect();
 
     // Check for existing media at path
-    const existingMedia = await findMediaByPath(client, absolutePath);
+    const existingMedia = await findMediaByPath(absolutePath);
         
     if (existingMedia !== undefined) {
         throw new Error(`Media already exists with media_id: ${existingMedia.media_id} \nfor path ${absolutePath}`);

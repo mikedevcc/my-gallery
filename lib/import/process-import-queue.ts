@@ -1,18 +1,32 @@
 import type { ImportJob } from "./import-job";
+import type { ImportConflict } from "./import-conflict";
 
+
+type ProcessFileResult =
+    | {
+        type: "COMPLETED";
+    }
+    | {
+        type: "CONFLICT";
+        conflict: ImportConflict;
+    };
 
 type ProcessFile = (
     jobId: string,
     file: File
-) => Promise<void>;
+) => Promise<ProcessFileResult>;
 
 type OnJobUpdate = (job: ImportJob) => void;
+
+type OnConflict = (conflict: ImportConflict) => void;
+
 
 export async function processImportQueue(
     jobs: ImportJob[],
     filesByJobId: Map<string, File>,
     processFile: ProcessFile,
-    onJobUpdate?: OnJobUpdate
+    onJobUpdate?: OnJobUpdate,
+    onConflict?: OnConflict
 ): Promise<ImportJob[]> {
     const updatedJobs = [...jobs];
 
@@ -46,7 +60,20 @@ export async function processImportQueue(
         onJobUpdate?.(updatedJobs[i]);
 
         try {
-            await processFile(job.id, file);
+            const result = await processFile(job.id, file);
+
+            if (result.type === "CONFLICT") {
+                    updatedJobs[i] = {
+                    ...updatedJobs[i],
+                    status: "AWAITING_DECISION",
+                    progress: 0,
+                };
+
+                onJobUpdate?.(updatedJobs[i]);
+                onConflict?.(result.conflict);
+
+                continue;
+            }
 
             updatedJobs[i] = {
                 ...updatedJobs[i],

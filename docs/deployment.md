@@ -45,6 +45,7 @@ Remove it before retrying:
 
 ```bash
 sudo -u postgres dropdb nominatim
+```
 
 ## Nominatim OSM import
 
@@ -63,6 +64,7 @@ Command:
 nominatim import \
   --project-dir /srv/nominatim/project \
   --osm-file /srv/nominatim/project/malaysia-singapore-brunei-latest.osm.pbf
+```
 
 ## Storage
 - Gallery storage root
@@ -80,5 +82,11 @@ nominatim import \
 Development server:
 
 ```bash
-nominatim serve \
-  --project-dir /srv/nominatim/project
+sudo -u nominatim -H bash
+
+source /srv/nominatim/nominatim-venv/bin/activate
+cd /srv/nominatim/project
+
+
+nominatim serve --project-dir /srv/nominatim/project
+```

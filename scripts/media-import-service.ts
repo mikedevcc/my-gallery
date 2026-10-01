@@ -1,34 +1,66 @@
+import path from "node:path";
+import fs from "node:fs/promises";
+
 import {
     ImportedMedia,
     importMedia,
 } from "./media-import";
-import { insertImportedMedia } from "./media-database";
+import {
+    insertImportedMedia,
+    findMediaByPath,
+} from "./media-database";
 import { 
     removeEmptyParentDirectories,
     buildDestinationPath, 
     stageMediaFile, 
     finalizeStagedMedia,
+    destinationExists,
 } from "./media-storage";
 import { 
     resolveLocation, 
     type ResolvedLocation
 } from "./media-location"
 
-import fs from "node:fs/promises";
+import { ImportConflict } from "@/lib/import/import-conflict";
 
 
+type ServerImportResult =
+    | {
+        type: "COMPLETED";
+        mediaId: number;
+    }
+    | {
+        type: "CONFLICT";
+        conflict: ImportConflict;
+    };
 
-export async function importMediaToLibrary(
-    sourcePath: string
-): Promise<number> {
-    let finalPath: string | undefined;
 
+async function cleanupStagedJob(stagedPath: string): Promise<void> {
     try {
-        const imported = await importMedia(sourcePath);
+        await fs.rm(path.dirname(stagedPath), {
+            recursive: true,
+            force: true,
+        });
+    }
+    catch (cleanupError) {
+        console.error(
+            "Failed to clean up staged file:",
+            cleanupError
+        );
+    }
+}
+
+
+export async function processStagedMedia(
+    stagedPath: string,
+    jobId: string
+): Promise<ServerImportResult> {
+    let finalPath: string | undefined;
+    try {
+        const imported = await importMedia(stagedPath);
 
         const { latitude, longitude } = imported.media;
 
-        
         let location: ResolvedLocation = {};
 
         if (latitude !== undefined && longitude !== undefined) {
@@ -38,9 +70,48 @@ export async function importMediaToLibrary(
 
         const destination = buildDestinationPath(imported, location.city);
 
-        const staged = await stageMediaFile(imported.file.absolutePath);
+        const exists = await destinationExists(destination);
 
-        finalPath = await finalizeStagedMedia(staged, destination);
+        console.log("[media-import] Conflict check", {
+            jobId,
+            stagedPath,
+            fileName: imported.file.fileName,
+            dateTaken: imported.media.dateTaken,
+            city: location.city,
+            destination,
+            exists,
+        });
+
+        if (exists) {
+            const conflictId = path.basename(path.dirname(stagedPath));
+
+            console.log("[media-import] Filename conflict detected", {
+                jobId,
+                conflictId,
+                destination,
+            });
+
+            const existingMedia = await findMediaByPath(destination);
+
+            console.log("[media-import] Existing DB media", {
+                existingMedia,
+            });
+
+            return {
+                type: "CONFLICT",
+                conflict: {
+                    type: "FILENAME",
+                    jobId,
+                    conflictId,
+                    existingMediaId: existingMedia?.media_id,
+                    existingPath: destination,
+                }
+            }
+        }
+
+        finalPath = await finalizeStagedMedia(stagedPath, destination);
+
+        await cleanupStagedJob(stagedPath);
         
         const storedImported: ImportedMedia = {
             ...imported,
@@ -56,9 +127,14 @@ export async function importMediaToLibrary(
             location.city
         );
 
-        return media_id;
+        return {
+            type: "COMPLETED",
+            mediaId: media_id,
+        };
     }
     catch (error) {
+        await cleanupStagedJob(stagedPath);
+
         if (finalPath !== undefined) {
             try {
                 await fs.rm(finalPath, { force: true });
@@ -73,9 +149,12 @@ export async function importMediaToLibrary(
     }
 }
 
-async function main () {
-    const mediaId = await importMediaToLibrary("../../../Videos/VID_20260923_204043.mp4");
-    console.log(mediaId);
-}
 
-main();
+export async function importMediaToLibrary(
+    file: File,
+    jobId: string
+): Promise<ServerImportResult> {
+        const stagedPath = await stageMediaFile(file);
+        
+        return processStagedMedia(stagedPath, jobId);
+}

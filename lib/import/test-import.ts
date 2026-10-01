@@ -1,82 +1,45 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+
 import { createImportJobs } from "./create-import-jobs";
 import {
     validateImportJobs,
     applyValidationResults,
 } from "./validate-import-jobs";
 import { processImportQueue } from "./process-import-queue";
+import { importMediaToLibrary } from "../../scripts/media-import-service";
 
-const testFiles = [
-    new File(["image data"], "photo.jpg", {
-        type: "image/jpeg",
-    }),
-    new File(["video data"], "movie.mp4", {
-        type: "video/mp4",
-    }),
-    new File(["text"], "notes.txt", {
-        type: "text/plain",
-    }),
-    new File([], "empty.jpg", {
-        type: "image/jpeg",
-    }),
-];
-
-const {
-    jobs,
-    filesByJobId,
-} = createImportJobs(testFiles);
-
-console.log("Before validation:");
-console.log(jobs);
-
-const validationResults = validateImportJobs(
-    jobs,
-    filesByJobId
-);
-
-console.log("Validation results:");
-console.log(validationResults);
-
-const validatedJobs = applyValidationResults(
-    jobs,
-    validationResults
-);
-
-console.log("After validation:");
-console.log(validatedJobs);
-
-async function fakeProcessFile(
+async function queueAdapter(
     jobId: string,
     file: File
 ): Promise<void> {
-    console.log(`Processing ${file.name}`);
+    const mediaId = await importMediaToLibrary(file);
 
-    await new Promise((resolve) =>
-        setTimeout(resolve, 500)
+    console.log(
+        `Job ${jobId} imported as media ID ${mediaId}`
+    );
+}
+
+async function fileFromPath(filePath: string): Promise<File> {
+    const fileBuffer = await fs.readFile(filePath);
+
+    const file = new File(
+        [fileBuffer],
+        path.basename(filePath)
     );
 
-    if (file.name.includes("fail")) {
-        throw new Error("Simulated import failure");
-    }
+    return file
 }
 
 async function main(): Promise<void> {
-    const testFiles = [
-        new File(["image data"], "photo.jpg", {
-            type: "image/jpeg",
-        }),
-        new File(["video data"], "movie.mp4", {
-            type: "video/mp4",
-        }),
-        new File(["text"], "notes.txt", {
-            type: "text/plain",
-        }),
-        new File([], "empty.jpg", {
-            type: "image/jpeg",
-        }),
-        new File(["bad image"], "fail.jpg", {
-            type: "image/jpeg",
-        }),
+    const testPaths = [
+        "/home/mikef/Pictures/IMG_20260922_200308.jpg",
+        "/home/mikef/Videos/VID_20260923_204043.mp4",
     ];
+
+    const testFiles = await Promise.all(
+        testPaths.map(path => fileFromPath(path))
+    );
 
     const {
         jobs,
@@ -105,7 +68,7 @@ async function main(): Promise<void> {
     const processedJobs = await processImportQueue(
         validatedJobs,
         filesByJobId,
-        fakeProcessFile,
+        queueAdapter,
         (job) => {
             console.log(
                 `${job.fileName}: ${job.status} (${job.progress}%)`

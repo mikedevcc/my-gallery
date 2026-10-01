@@ -1,9 +1,13 @@
 import path from "node:path";
 import fs from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
+import { createWriteStream } from "node:fs";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { randomUUID } from "node:crypto";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 
 import type { ImportedMedia } from "./media-import";
+
 
 
 const storageRoot = "/home/mikef/Projects/temp_storage"
@@ -70,31 +74,38 @@ export function buildDestinationPath(
 
 
 export async function stageMediaFile(
-    sourcePath:string
+    file: File
 ): Promise<string> {
     const incomingPath = path.join(storageRoot, ".incoming");
-    
+
+    const jobPath = path.join(incomingPath, randomUUID());
+
     // Create .incoming folder if not exist
-    await fs.mkdir(incomingPath, {recursive: true});
+    await fs.mkdir(jobPath, { recursive: true });
 
-    const fileName = randomUUID() +  path.extname(sourcePath);
-
-    const stagedPath = path.join(incomingPath, fileName);
+    const stagedPath = path.join(jobPath, file.name);
 
     // Copy source file into .incoming
     try {
-        await fs.copyFile(
-            sourcePath, 
-            stagedPath,
-            fsConstants.COPYFILE_EXCL
+        const webStream = file.stream();
+        
+        const source = Readable.fromWeb(
+            webStream as unknown as NodeReadableStream<Uint8Array>
         );
+
+        const destination = createWriteStream(stagedPath, { flags: "wx" });
+
+        await pipeline(source, destination);
 
         return stagedPath;
     }
     catch (error) {
         // remove a potentially incomplete staged file
         try {
-            await fs.rm(stagedPath, { force: true });
+            await fs.rm(jobPath, { 
+                recursive: true,
+                force: true
+            });
         }
         catch (cleanupError) {
             console.error("Failed to clean up staged file:", cleanupError);
@@ -135,6 +146,11 @@ export async function finalizeStagedMedia(
             const fsError = error as NodeJS.ErrnoException;
 
             if (fsError.code === "EEXIST") {
+                console.warn("[media-import] Finalization collision", {
+                    stagedPath,
+                    destinationPath,
+                    finalPath,
+                });
                 altCount++;
                 continue;
             }
@@ -164,4 +180,37 @@ export async function finalizeStagedMedia(
 
         return finalPath;
     }
+}
+
+
+export async function destinationExists(
+    destinationPath: string
+): Promise<boolean> {
+    try {
+        await fs.access(destinationPath);
+        return true;
+    }
+    catch (error) {
+        console.warn("[media-import] Destination access failed", {
+            destinationPath,
+            error,
+        });
+        return false;
+    }
+}
+
+
+export async function removeStagedConflict(
+    conflictId: string
+): Promise<void> {
+    const conflictPath = path.join(
+        storageRoot,
+        ".incoming",
+        conflictId
+    );
+
+    await fs.rm(conflictPath, {
+        recursive: true,
+        force: true,
+    });
 }
