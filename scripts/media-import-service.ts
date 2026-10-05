@@ -1,3 +1,4 @@
+import { savePendingConflict } from "./pending-import-conflicts";
 import path from "node:path";
 import fs from "node:fs/promises";
 
@@ -115,16 +116,13 @@ export async function processStagedMedia(
                 existingMedia,
             });
 
-            return {
-                type: "CONFLICT",
-                conflict: {
-                    type: "FILENAME",
-                    jobId,
-                    conflictId,
-                    existingMediaId: existingMedia?.media_id,
-                    existingPath: destination,
-                }
-            }
+            const conflict: ImportConflict = {
+                type: "FILENAME", jobId, conflictId,
+                existingMediaId: existingMedia?.media_id,
+                existingPath: destination,
+            };
+            await savePendingConflict(stagedPath, conflict);
+            return { type: "CONFLICT", conflict };
         }
 
         finalPath = await finalizeStagedMedia(stagedPath, destination);
@@ -178,7 +176,7 @@ export async function importMediaToLibrary(
 }
 
 
-export async function resolveStagedConflict(
+async function applyStagedConflictResolution(
     conflictId: string,
     action: ConflictAction
 ): Promise<ConflictResolutionResult> {
@@ -319,4 +317,25 @@ export async function resolveStagedConflict(
     throw new Error(
         `Conflict action ${action} is not implemented`
     );
+}
+
+export async function resolveStagedConflict(
+    conflictId: string,
+    action: ConflictAction
+): Promise<ConflictResolutionResult> {
+    const stagedPath = await findStagedConflictFile(conflictId);
+    const lockPath = path.join(path.dirname(stagedPath), ".resolution-lock");
+    try {
+        await fs.mkdir(lockPath);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+            throw new Error("This file is already being resolved.");
+        }
+        throw error;
+    }
+    try {
+        return await applyStagedConflictResolution(conflictId, action);
+    } finally {
+        await fs.rm(lockPath, { recursive: true, force: true });
+    }
 }

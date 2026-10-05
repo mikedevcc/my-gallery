@@ -16,7 +16,7 @@ export type ReplacementState = {
 };
 
 
-const storageRoot = "/home/mikef/Projects/temp_storage"
+export const storageRoot = "/home/mikef/Projects/temp_storage"
 
 
 export async function removeEmptyParentDirectories(
@@ -248,7 +248,7 @@ export async function findStagedConflictFile(
 
     // make sure exactly one file exists
     const files = entries.filter(
-        (entry) => entry.isFile()
+        (entry) => entry.isFile() && entry.name !== ".conflict.json"
     )
 
     if (files.length !== 1) {

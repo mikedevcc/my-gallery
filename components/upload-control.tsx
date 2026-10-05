@@ -1,17 +1,48 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
+import type { ConflictAction } from "@/lib/import/import-conflict";
+import { ImportConflictModal } from "./import-conflict-modal";
 import { Icon } from "./icons";
 import { useImportQueue } from "@/lib/import/use-import-queue";
 
 export function UploadControl() {
     const inputRef = useRef<HTMLInputElement>(null);
+    const resolvingRef = useRef(false);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
     const {
+        jobs,
         conflicts,
+        isImporting,
+        isRecovering,
+        recoveryError,
         startImport,
         resolveConflict,
+        resolveAllConflicts,
     } = useImportQueue();
+
+    const conflict = conflicts[0];
+
+    async function handleResolution(action: ConflictAction, all = false): Promise<void> {
+        if (!conflict || resolvingRef.current) return;
+        resolvingRef.current = true;
+        setBusy(true);
+        setError(null);
+        try {
+            if (all) {
+                await resolveAllConflicts(action);
+            } else {
+                await resolveConflict(conflict, action);
+            }
+        } catch (cause) {
+            setError(cause instanceof Error ? cause.message : "Could not resolve this conflict. Please try again.");
+        } finally {
+            resolvingRef.current = false;
+            setBusy(false);
+        }
+    }
 
     function openFilePicker(): void {
         inputRef.current?.click();
@@ -28,6 +59,8 @@ export function UploadControl() {
 
         const files = Array.from(fileList);
 
+        event.target.value = "";
+        setError(null);
         await startImport(files);
     }
 
@@ -37,6 +70,7 @@ export function UploadControl() {
                 className="upload-btn"
                 type="button"
                 onClick={openFilePicker}
+                disabled={isRecovering || !!recoveryError || isImporting || conflicts.length > 0 || busy}
             >
                 <Icon name="plus" size={17}/>
                 <span>Upload</span>
@@ -51,38 +85,19 @@ export function UploadControl() {
                 hidden
             />
 
-            <div>
-                {conflicts.map(conflict => (
-                    <div key={conflict.conflictId}>
-                        <button
-                            type="button"
-                            onClick={() =>
-                                resolveConflict(conflict, "SKIP")
-                            }
-                        >
-                            Skip
-                        </button>
-
-                        <button
-                            type="button"
-                            onClick={() =>
-                                resolveConflict(conflict, "KEEP_BOTH")
-                            }
-                        >
-                            Keep Both
-                        </button>
-
-                        <button
-                            type="button"
-                            onClick={() =>
-                                resolveConflict(conflict, "REPLACE")
-                            }
-                        >
-                            Replace
-                        </button>
-                    </div>
-                ))}
-            </div>
+            {recoveryError && <span role="alert">{recoveryError}</span>}
+            {conflict && (
+                <ImportConflictModal
+                    conflict={conflict}
+                    incomingFilename={jobs.find(job => job.id === conflict.jobId)?.fileName ?? (conflict.type === "FILENAME" ? conflict.existingPath.split(/[\\/]/).pop() : undefined) ?? "Incoming file"}
+                    remaining={conflicts.length}
+                    bulkRemaining={conflicts.filter(item => item.type === "FILENAME").length}
+                    busy={busy}
+                    error={error}
+                    onResolve={action => { void handleResolution(action); }}
+                    onResolveAll={action => { void handleResolution(action, true); }}
+                />
+            )}
         </>
     );
 }
