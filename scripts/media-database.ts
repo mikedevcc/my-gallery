@@ -14,6 +14,22 @@ type CityIdRow = {
     city_id: number;
 };
 
+type TripRow = {
+    trip_id: number;
+    trip_name: string;
+};
+
+type TripMediaRow = {
+    media_id: number;
+    file_name: string;
+    file_type: "IMAGE" | "VIDEO";
+    path: string;
+    date_taken: Date | null;
+    width: number | null;
+    height: number | null;
+    favorite: boolean;
+};
+
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -398,6 +414,140 @@ export async function updateImportedMedia(
     catch (error) {
         await client.query("ROLLBACK");
         throw error;
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function createTrip(
+    tripName: string
+): Promise<number> {
+    const client = await pool.connect();
+
+    try {
+        const result = await client.query<{ trip_id: number }>(
+            `INSERT INTO trip (trip_name)
+            VALUES ($1)
+            RETURNING trip_id`,
+            [tripName]
+        );
+
+        return result.rows[0].trip_id;
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function getTrips(): Promise<TripRow[]> {
+    const client = await pool.connect();
+
+    try{
+        const result = await client.query<TripRow>(
+            `SELECT trip_id, trip_name
+            FROM trip
+            ORDER BY trip_id DESC`
+        );
+
+        return result.rows;
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function getTripById(
+    tripId: number
+): Promise<TripRow | undefined> {
+    const client = await pool.connect();
+
+    try {
+        const result = await client.query<TripRow>(
+            `SELECT trip_id, trip_name
+             FROM trip
+             WHERE trip_id = $1
+             LIMIT 1`,
+            [tripId]
+        );
+
+        return result.rows[0];
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function getMediaByTripId(
+    tripId: number
+): Promise<TripMediaRow[]> {
+    const client = await pool.connect();
+
+    try {
+        const result = await client.query<TripMediaRow>(
+            `SELECT
+                media_id,
+                file_name,
+                file_type,
+                path,
+                date_taken,
+                width,
+                height,
+                favorite
+             FROM media
+             WHERE trip_id = $1
+             ORDER BY date_taken ASC NULLS LAST`,
+            [tripId]
+        );
+
+        return result.rows;
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function addMediaToTrip(
+    mediaId: number,
+    tripId: number
+): Promise<void> {
+    const client = await pool.connect();
+
+    try {
+        await client.query(
+            `UPDATE media
+            SET trip_id = $1
+            WHERE media_id = $2`,
+            [tripId, mediaId]
+        );
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function removeMediaFromTrip(
+    mediaId: number,
+    tripId: number
+): Promise<boolean> {
+    const client = await pool.connect();
+
+    try {
+        const result = await client.query(
+            `UPDATE media
+            SET trip_id = NULL
+            WHERE media_id = $1
+            AND trip_id = $2`,
+            [mediaId, tripId]
+        );
+
+        return result.rowCount === 1;
     }
     finally {
         client.release();
