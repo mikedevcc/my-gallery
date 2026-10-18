@@ -1,5 +1,7 @@
 import {
     addMediaToTrip,
+    getTripById,
+    moveMediaToTrip,
     removeMediaFromTrip,
 } from "@/scripts/media-database";
 
@@ -13,6 +15,11 @@ type RouteContext = {
 type MediaRequest = {
     mediaId?: number;
 };
+
+type TripRequest = {
+    mediaIds: number[];
+    targetTripId: number;
+}
 
 
 export async function POST(
@@ -94,4 +101,96 @@ export async function DELETE(
     return Response.json(
         { message: "Media removed from trip" }
     )
+}
+
+
+export async function PATCH(
+    request: Request,
+    context: RouteContext
+) {
+    const { tripId } = await context.params;
+    const sourceTripId = Number(tripId);
+
+    const body = await request.json() as TripRequest;
+    const mediaIds = body.mediaIds;
+    const targetTripId = body.targetTripId;
+
+    if (
+        !Array.isArray(mediaIds) ||
+        mediaIds.length === 0
+    ) {
+        return Response.json(
+            { error: "No media selected" },
+            { status: 400 }
+        );
+    }
+
+    if (mediaIds.some(
+        mediaId => 
+            !Number.isInteger(mediaId) ||
+            mediaId <= 0
+        )
+    ) {
+        return Response.json(
+            { error: "Invalid media ID" },
+            { status: 400 }
+        );
+    }
+
+    if (
+        !Number.isInteger(sourceTripId) ||
+        sourceTripId <= 0
+    ) {
+        return Response.json(
+            { error: "Invalid source trip ID" },
+            { status: 400 }
+        );
+    }
+
+    if (
+        !Number.isInteger(targetTripId) ||
+        targetTripId <= 0
+    ) {
+        return Response.json(
+            { error: "Invalid target trip ID" },
+            { status: 400 }
+        );
+    }
+
+    if (targetTripId === sourceTripId) {
+        return Response.json(
+            { error: "Source and target trip IDs are the same" },
+            { status: 400 }
+        );
+    }
+
+    const targetTrip = await getTripById(targetTripId);
+
+    if (!targetTrip) {
+        return Response.json(
+            { error: "Target trip not found" },
+            { status: 404 }
+        );
+    }
+
+    const moveFailedmediaIds = await moveMediaToTrip(
+        mediaIds,
+        sourceTripId,
+        targetTripId
+    );
+
+    if (moveFailedmediaIds.length !== 0) {
+        return Response.json(
+            { error: `Media failed to move: ${moveFailedmediaIds.join(", ")}` },
+            { status: 400 }
+        );
+    }
+
+    return Response.json(
+        {
+            message: "Media moved successfully",
+            movedCount: mediaIds.length,
+        },
+        { status: 200 }
+    );
 }

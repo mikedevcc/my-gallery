@@ -197,11 +197,21 @@ export async function destinationExists(
         return true;
     }
     catch (error) {
-        console.warn("[media-import] Destination access failed", {
-            destinationPath,
-            error,
-        });
-        return false;
+        const fsError = error as NodeJS.ErrnoException;
+
+        if (fsError.code === "ENOENT") {
+            return false;
+        }
+
+        console.error(
+            "[media-storage] Failed to access destination:",
+            {
+                destinationPath,
+                error,
+            }
+        );
+
+        throw error;
     }
 }
 
@@ -323,4 +333,24 @@ export async function rollbackMediaReplacement(
         replacement.backupPath,
         replacement.destinationPath
     );
+}
+
+
+export async function deleteStoredMedia(
+    mediaPath: string
+): Promise<void> {
+    try {
+        await fs.unlink(mediaPath);
+    }
+    catch (error) {
+        if (
+            error instanceof Error &&
+            'code' in error &&
+            error.code === 'ENOENT'
+        ) {
+            return;
+        }
+
+        throw error;
+    }
 }

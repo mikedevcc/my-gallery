@@ -2,12 +2,20 @@
 
 import { useEffect, useState } from 'react';
 
+import Image from "next/image";
+import Link from "next/link";
+import { useRouter } from 'next/navigation';
+
 import { Icon } from './icons';
+import { TripMediaPicker } from './trip-media-picker';
+import { MoveMediaModal } from './move-media-modal';
+import { DeleteMediaModal } from './delete-media-modal';
 
 
 type TripRow = {
     trip_id: number;
     trip_name: string;
+    cover_media_id: number | null;
 };
 
 type TripMediaRow = {
@@ -37,14 +45,139 @@ export function TripDetail({
     const [error, setError] = useState<string | null>(null);
 
     const [tab, setTab] = useState('Overview');
+    const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+    
+    const selectionStorageKey =
+        `trip-selection:${slug}`;
+
+    const [selectedMediaIds, setSelectedMediaIds] =
+        useState<number[]>(() => {
+            if (typeof window === 'undefined') {
+                return [];
+            }
+
+            const stored =
+                sessionStorage.getItem(
+                    `trip-selection:${slug}`
+                );
+
+            if (!stored) {
+                return [];
+            }
+
+            try {
+                return JSON.parse(stored) as number[];
+            }
+            catch {
+                return [];
+            }
+        });
+
+    const [moveModalOpen, setMoveModalOpen] = useState(false);
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+
+    const router = useRouter();
+
+    
+    useEffect(() => {
+        sessionStorage.setItem(
+            selectionStorageKey,
+            JSON.stringify(selectedMediaIds)
+        );
+    }, [
+        selectionStorageKey,
+        selectedMediaIds,
+    ]);
+
+
+    function toggleMediaSelection(mediaId: number) {
+        setSelectedMediaIds(current =>
+            current.includes(mediaId)
+                ? current.filter(id => id !== mediaId)
+                : [...current, mediaId]
+        );
+    }
+
+
+    async function refreshTrip() {
+        try {
+            const response =
+                await fetch(`/api/trips/${slug}`);
+
+            if (!response.ok) {
+                throw new Error(
+                    `Failed to load trip (${response.status})`
+                );
+            }
+
+            const result =
+                await response.json() as TripResponse;
+
+            setData(result);
+        }
+        catch (error) {
+            setError(
+                error instanceof Error
+                    ? error.message
+                    : 'Failed to load trip'
+            );
+        }
+    }
+
+
+    async function removeSelectedFromTrip() {
+        if (validSelectedMediaIds.length === 0) {
+            return;
+        }
+
+        const confirmed = window.confirm(
+            `Remove ${validSelectedMediaIds.length} selected item${
+                validSelectedMediaIds.length === 1 ? '' : 's'
+            } from this trip?`
+        );
+
+        if (!confirmed) {
+            return;
+        }
+
+        try {
+            for (const mediaId of validSelectedMediaIds) {
+                const response = await fetch(
+                    `/api/trips/${trip.trip_id}/media`,
+                    {
+                        method: 'DELETE',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            mediaId,
+                        }),
+                    }
+                );
+
+                if (!response.ok) {
+                    throw new Error(
+                        `Failed to remove media ${mediaId}`
+                    );
+                }
+            }
+
+            setSelectedMediaIds([]);
+            await refreshTrip();
+        }
+        catch (error) {
+            console.error(
+                'Failed to remove media from trip:',
+                error
+            );
+        }
+    }
 
 
     useEffect(() => {
         async function loadTrip() {
             try {
-                const response = await fetch(
-                    `/api/trips/${slug}`
-                );
+                const response = await fetch(`/api/trips/${slug}`);
 
                 if (!response.ok) {
                     throw new Error(
@@ -98,10 +231,65 @@ export function TripDetail({
     } = data;
 
 
+    const validSelectedMediaIds =
+    selectedMediaIds.filter(
+        mediaId =>
+            media.some(
+                item =>
+                    item.media_id === mediaId
+            )
+    );
+    
+
+    const allMediaSelected =
+        media.length > 0 &&
+        media.every(item =>
+            validSelectedMediaIds.includes(
+                item.media_id
+            )
+        );
+
+
+    function toggleSelectAll() {
+        if (allMediaSelected) {
+            setSelectedMediaIds([]);
+            return;
+        }
+
+        setSelectedMediaIds(
+            media.map(
+                item => item.media_id
+            )
+        );
+    }
+
+
     return (
         <>
             <div className="trip-hero">
+                {trip.cover_media_id !== null && (
+                    <Image
+                        src={`/api/media/${trip.cover_media_id}/thumbnail`}
+                        alt={trip.trip_name}
+                        fill
+                        unoptimized
+                        priority
+                    />
+                )}
                 <div className="trip-hero-shade"/>
+
+                <button
+                    type="button"
+                    className="trip-back-button"
+                    onClick={() => router.back()}
+                    aria-label="Go back"
+                >
+                    <Icon
+                        name="back"
+                        size={18}
+                    />
+                    Back
+                </button>
 
                 <div className="trip-hero-content">
                     <div className="hero-eyebrow">
@@ -134,24 +322,97 @@ export function TripDetail({
             </div>
 
 
-            <div className="detail-tabs">
-                {[
-                    'Overview',
-                    'Timeline',
-                    'Photos',
-                ].map(item => (
+            <div className="trip-sticky-controls">
+
+                <div className="trip-controls">
+                    <div className="detail-tabs">
+                        {[
+                            'Overview',
+                            'Timeline',
+                            'Photos',
+                        ].map(item => (
+                            <button
+                                key={item}
+                                className={
+                                    tab === item
+                                        ? 'active'
+                                        : ''
+                                }
+                                onClick={() => setTab(item)}
+                            >
+                                {item}
+                            </button>
+                        ))}
+                    </div>
+
                     <button
-                        key={item}
-                        className={
-                            tab === item
-                                ? 'active'
-                                : ''
+                        className="trip-add-media"
+                        onClick={() =>
+                            setMediaPickerOpen(true)
                         }
-                        onClick={() => setTab(item)}
                     >
-                        {item}
+                        <Icon
+                            name="plus"
+                            size={16}
+                        />
+                        Add media
                     </button>
-                ))}
+                </div>
+
+                {validSelectedMediaIds.length > 0 && (
+                    <div className="trip-selection-bar">
+
+                        <div className="trip-selection-summary">
+                            <span>
+                                {validSelectedMediaIds.length} selected
+                            </span>
+
+                            <button
+                                type="button"
+                                className="trip-select-all"
+                                onClick={toggleSelectAll}
+                            >
+                                {allMediaSelected
+                                    ? 'Unselect all'
+                                    : 'Select all'}
+                            </button>
+                        </div>
+
+                        <div className="trip-selection-actions">
+
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    void removeSelectedFromTrip();
+                                }}
+                            >
+                                Remove from trip
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setMoveModalOpen(true);
+                                }}
+                            >
+                                Move to trip
+                            </button>
+
+                            <button
+                                type="button"
+                                className="danger"
+                                onClick={() => {
+                                    setDeleteModalOpen(true);
+                                }}
+                            >
+                                Delete
+                            </button>
+
+                        </div>
+
+                    </div>
+                )}
+
             </div>
 
 
@@ -192,31 +453,83 @@ export function TripDetail({
                     </p>
                 </div>
             ) : (
-                <div className="trip-media-debug">
+                <div className="photo-grid">
                     {media.map(item => (
                         <div
-                            key={item.media_id}
-                            className="trip-media-debug-item"
+                        key={item.media_id}
+                        className={`trip-media-tile ${
+                            validSelectedMediaIds.includes(item.media_id)
+                                ? 'selected'
+                                : ''
+                        }`}
+
+                    >
+                        <Link
+                            href={`/photo/${item.media_id}?tripId=${trip.trip_id}`}
+                            scroll={false}
+                            className="photo-tile"
                         >
-                            <strong>
-                                {item.file_name}
-                            </strong>
+                            <Image
+                                src={`/api/media/${item.media_id}/thumbnail`}
+                                alt={item.file_name}
+                                fill
+                                unoptimized
+                                className="photo-img"
+                            />
+                        </Link>
 
-                            <span>
-                                {item.file_type}
-                            </span>
-
-                            {item.date_taken && (
-                                <span>
-                                    {new Date(
-                                        item.date_taken
-                                    ).toLocaleDateString()}
-                                </span>
-                            )}
-                        </div>
+                        <button
+                            type="button"
+                            className="trip-media-select"
+                            aria-label={`Select ${item.file_name}`}
+                            onClick={() => 
+                                toggleMediaSelection(item.media_id)
+                            }
+                        >
+                            {validSelectedMediaIds.includes(item.media_id)
+                                ? '✓'
+                                : ''}
+                        </button>
+                    </div>
                     ))}
                 </div>
             )}
+
+            <TripMediaPicker
+                tripId={trip.trip_id}
+                open={mediaPickerOpen}
+                onClose={() =>
+                    setMediaPickerOpen(false)
+                }
+                onAdded={() => {
+                    void refreshTrip();
+                }}
+            />
+
+            <MoveMediaModal
+                open={moveModalOpen}
+                sourceTripId={trip.trip_id}
+                mediaIds={selectedMediaIds}
+                onClose={() => {
+                    setMoveModalOpen(false);
+                }}
+                onMoved={() => {
+                    setSelectedMediaIds([]);
+                    void refreshTrip();
+                }}
+            />
+
+            <DeleteMediaModal
+                open={deleteModalOpen}
+                mediaIds={validSelectedMediaIds}
+                onClose={() => {
+                    setDeleteModalOpen(false);
+                }}
+                onDeleted={() => {
+                    setSelectedMediaIds([]);
+                    void refreshTrip();
+                }}
+            />
         </>
     );
 }

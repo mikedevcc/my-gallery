@@ -17,6 +17,8 @@ type CityIdRow = {
 type TripRow = {
     trip_id: number;
     trip_name: string;
+    media_count: number;
+    cover_media_id: number | null;
 };
 
 type TripMediaRow = {
@@ -29,6 +31,58 @@ type TripMediaRow = {
     height: number | null;
     favorite: boolean;
 };
+
+export type MediaFileRow = {
+    media_id: number;
+    file_name: string;
+    file_type: "IMAGE" | "VIDEO";
+    path: string;
+};
+
+export type MediaDetailRow = {
+    media_id: number;
+    file_name: string;
+    file_type: "IMAGE" | "VIDEO";
+    file_size: number;
+    path: string;
+    date_taken: Date | null;
+    width: number | null;
+    height: number | null;
+    favorite: boolean;
+
+    city_name: string | null;
+    country_name: string | null;
+
+    aperture: number | null;
+    iso: number | null;
+    exposure_time: number | null;
+    focal_length_mm: number | null;
+    focal_length_35mm: number | null;
+    flash: string | null;
+    white_balance: string | null;
+
+    duration_seconds: number | null;
+    frame_rate: number | null;
+    video_codec: string | null;
+    audio_codec: string | null;
+    bitrate: number | null;
+};
+
+export type AvailableMediaRow = {
+    media_id: number;
+    file_name: string;
+    file_type: "IMAGE" | "VIDEO";
+    date_taken: Date | null;
+    width: number | null;
+    height: number | null;
+};
+
+export type DeletedMediaRow = {
+    media_id: number;
+    path: string;
+};
+
+
 
 
 const pool = new Pool({
@@ -447,9 +501,18 @@ export async function getTrips(): Promise<TripRow[]> {
 
     try{
         const result = await client.query<TripRow>(
-            `SELECT trip_id, trip_name
-            FROM trip
-            ORDER BY trip_id DESC`
+            `SELECT
+                t.trip_id,
+                t.trip_name,
+                COUNT(m.media_id)::int AS media_count,
+                MIN(m.media_id) AS cover_media_id
+            FROM trip t
+            LEFT JOIN media m
+                ON m.trip_id = t.trip_id
+            GROUP BY
+                t.trip_id,
+                t.trip_name
+            ORDER BY t.trip_id DESC`
         );
 
         return result.rows;
@@ -467,10 +530,18 @@ export async function getTripById(
 
     try {
         const result = await client.query<TripRow>(
-            `SELECT trip_id, trip_name
-             FROM trip
-             WHERE trip_id = $1
-             LIMIT 1`,
+            `SELECT
+                t.trip_id,
+                t.trip_name,
+                MIN(m.media_id) AS cover_media_id
+            FROM trip t
+            LEFT JOIN media m
+                ON m.trip_id = t.trip_id
+            WHERE t.trip_id = $1
+            GROUP BY
+                t.trip_id,
+                t.trip_name
+            LIMIT 1`,
             [tripId]
         );
 
@@ -548,6 +619,195 @@ export async function removeMediaFromTrip(
         );
 
         return result.rowCount === 1;
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function getMediaFileById (
+    mediaId: number
+): Promise<MediaFileRow | undefined> {
+    const client = await pool.connect();
+
+    try {
+        const result = await client.query<MediaFileRow>(
+            `SELECT
+                media_id,
+                file_name,
+                file_type,
+                path
+            FROM media
+            WHERE media_id = $1`,
+            [mediaId]
+        );
+
+        return result.rows[0];
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function getMediaDetailsById(
+    mediaId: number
+): Promise<MediaDetailRow | undefined> {
+    const client = await pool.connect();
+    
+    try {
+        const result = await client.query<MediaDetailRow>(
+            `SELECT
+                m.media_id,
+                m.file_name,
+                m.file_type,
+                m.file_size,
+                m.path,
+                m.date_taken,
+                m.width,
+                m.height,
+                m.favorite,
+
+                c.city_name,
+                co.country_name,
+
+                i.aperture,
+                i.iso,
+                i.exposure_time,
+                i.focal_length_mm,
+                i.focal_length_35mm,
+                i.flash,
+                i.white_balance,
+
+                v.duration_seconds,
+                v.frame_rate,
+                v.video_codec,
+                v.audio_codec,
+                v.bitrate
+
+            FROM media m
+
+            LEFT JOIN city c
+                ON m.city_id = c.city_id
+
+            LEFT JOIN country co
+                ON c.country_id = co.country_id
+
+            LEFT JOIN image i
+                ON m.media_id = i.media_id
+
+            LEFT JOIN video v
+                ON m.media_id = v.media_id
+
+            WHERE m.media_id = $1
+
+            LIMIT 1;`,
+            [mediaId]
+        );
+
+        return result.rows[0];
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function getAvailableMedia(): Promise<AvailableMediaRow[]> {
+    const client = await pool.connect();
+
+    try {
+        const result = await client.query<AvailableMediaRow>(
+            `SELECT
+                media_id,
+                file_name,
+                file_type,
+                date_taken,
+                width,
+                height
+            FROM media
+            WHERE trip_id IS NULL
+            ORDER BY date_taken DESC NULLS LAST,
+                     media_id DESC`
+        );
+
+        return result.rows;
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function moveMediaToTrip(
+    mediaIds: number[],
+    sourceTripId: number,
+    targetTripId: number
+): Promise<number[]> {
+    const client = await pool.connect()
+
+    try {
+        await client.query("BEGIN");
+
+        const result = await client.query(
+            `UPDATE media
+            SET trip_id = $1
+            WHERE trip_id = $2
+            AND media_id = ANY($3::int[])
+            RETURNING media_id`,
+            [
+                targetTripId,
+                sourceTripId,
+                mediaIds
+            ]
+        );
+
+        const movedMediaIds = result.rows.map(
+            row => row.media_id
+        );
+    
+        const failedMediaIds = mediaIds.filter(
+            mediaId => 
+                !movedMediaIds.includes(mediaId)
+        );
+
+        if (failedMediaIds.length === 0) {
+            await client.query("COMMIT");
+        } 
+        else {
+            await client.query("ROLLBACK");
+        }
+
+        return failedMediaIds;
+    }
+    catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function deleteMediaById(
+    mediaId: number
+): Promise<DeletedMediaRow | undefined> {
+    const client = await pool.connect();
+
+    try {
+        const result =
+            await client.query<DeletedMediaRow>(
+                `DELETE FROM media
+                 WHERE media_id = $1
+                 RETURNING
+                    media_id,
+                    path`,
+                [mediaId]
+            );
+
+        return result.rows[0];
     }
     finally {
         client.release();

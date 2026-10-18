@@ -13,6 +13,8 @@
 
 ## Media Tools
 - ExifTool
+- ffmpeg
+- sharp
 
 ## Reverse Geocoding
 - Nominatim
