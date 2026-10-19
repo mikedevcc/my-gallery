@@ -331,9 +331,9 @@ export function TripDetail({
             </div>
 
 
-            <div className="trip-sticky-controls">
+            <div className="trip-controls-wrapper">
 
-                <div className="trip-controls">
+                <div className="timeline-controls">
                     <div className="segmented">
                         {['All', 'Days'].map(value => (
                             <button
@@ -463,31 +463,25 @@ export function TripDetail({
                     </p>
                 </div>
             ) : (
-                groupedMedia.map(
-                    ([title, items]) => (
+                groupedMedia.map(([title, items]) => (
                         <section
                             className="timeline-section"
                             key={title}
                         >
-                            <div className="section-heading">
-                                <div>
-                                    <h2>
-                                        {title === 'All'
-                                            ? ''
-                                            : title}
-                                    </h2>
+                            {title !== 'All' && (
+                                <div className="section-heading">
+                                    <div>
+                                        <h2>{title}</h2>
 
-                                    {title == 'All'
-                                        ? ''
-                                        : <p>
+                                        <p>
                                             {items.length}{' '}
                                             {items.length === 1
                                                 ? 'item'
                                                 : 'items'}
-                                        </p>}
-                                    
+                                        </p>
+                                    </div>
                                 </div>
-                            </div>
+                            )}
 
                             <div className="photo-grid">
                                 {items.map(item => (

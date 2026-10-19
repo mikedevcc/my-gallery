@@ -255,11 +255,7 @@
     background: #a15d52;
 }
 
-.trip-sticky-controls {
-    position: sticky;
-    top: 72px;
-    z-index: 9;
-
+.trip-controls-wrapper {
     background: var(--bg);
 }
 
@@ -950,7 +946,27 @@
     background: #eaf1ee;
 }
 
+.timeline-section > .section-heading {
+    position: sticky;
+    top: 72px;
+    z-index: 8;
+
+    min-height: 64px;
+    margin: 0;
+    padding: 14px 0 12px;
+
+    background: var(--bg);
+}
+
 @media (max-width: 760px) {
+    .timeline-section > .section-heading {
+        top: 58px;
+        min-height: 70px;
+
+        margin: 0;
+        padding: 14px 0 12px;
+    }
+
     .create-trip-backdrop {
         padding: 12px;
     }
@@ -996,10 +1012,6 @@
     .move-trip-option {
         min-height: 54px;
         padding: 0 13px;
-    }
-
-    .trip-sticky-controls {
-        top: 58px;
     }
 
     .trip-selection-bar {

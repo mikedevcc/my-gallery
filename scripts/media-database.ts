@@ -95,6 +95,13 @@ export type LibraryMediaRow = {
     country_name: string | null;
 };
 
+export type AlbumRow = {
+    album_id: number;
+    album_name: string;
+    media_count: number;
+    cover_media_id: number;
+}
+
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -859,5 +866,33 @@ export async function getLibraryMedia():
     }
     finally {
         client.release();
+    }
+}
+
+
+export async function getAlbums(): Promise<AlbumRow[]> {
+    const client = await pool.connect();
+
+    try {
+        const result = await client.query<AlbumRow>(`
+            SELECT
+                a.album_id,
+                a.album_name,
+                a.cover_media_id,
+                COUNT(m.media_id)::int AS media_count
+            FROM ablum a
+            LEFT JOIN media_album ma
+                ON ma.album_id = a.album_id
+            GROUP BY 
+                a.album_id,
+                a.album_name,
+                a.cover_media_id
+            ORDER BY
+                a.album_id DESC`);
+        
+        return result.rows;
+    }
+    finally {
+        client.release()
     }
 }
