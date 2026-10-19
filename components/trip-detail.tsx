@@ -6,6 +6,11 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from 'next/navigation';
 
+import {
+    type GroupMode,
+    groupMediaByDate
+} from '@/lib/media-grouping';
+
 import { Icon } from './icons';
 import { TripMediaPicker } from './trip-media-picker';
 import { MoveMediaModal } from './move-media-modal';
@@ -46,9 +51,6 @@ export function TripDetail({
 
     const [tab, setTab] = useState('Overview');
     const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
-    
-    const selectionStorageKey =
-        `trip-selection:${slug}`;
 
     const [selectedMediaIds, setSelectedMediaIds] =
         useState<number[]>(() => {
@@ -75,6 +77,10 @@ export function TripDetail({
 
     const [moveModalOpen, setMoveModalOpen] = useState(false);
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+
+    const [group, setGroup] = useState<'All' | 'Days'>('All');
+
+    const selectionStorageKey = `trip-selection:${slug}`;
 
     const router = useRouter();
 
@@ -250,6 +256,9 @@ export function TripDetail({
         );
 
 
+    const groupedMedia = groupMediaByDate(media, group);
+
+
     function toggleSelectAll() {
         if (allMediaSelected) {
             setSelectedMediaIds([]);
@@ -325,22 +334,23 @@ export function TripDetail({
             <div className="trip-sticky-controls">
 
                 <div className="trip-controls">
-                    <div className="detail-tabs">
-                        {[
-                            'Overview',
-                            'Timeline',
-                            'Photos',
-                        ].map(item => (
+                    <div className="segmented">
+                        {['All', 'Days'].map(value => (
                             <button
-                                key={item}
+                                key={value}
                                 className={
-                                    tab === item
-                                        ? 'active'
+                                    group === value
+                                        ? 'selected'
                                         : ''
                                 }
-                                onClick={() => setTab(item)}
+                                onClick={() =>
+                                    setGroup(
+                                        value as
+                                            'All' | 'Days'
+                                    )
+                                }
                             >
-                                {item}
+                                {value}
                             </button>
                         ))}
                     </div>
@@ -453,46 +463,77 @@ export function TripDetail({
                     </p>
                 </div>
             ) : (
-                <div className="photo-grid">
-                    {media.map(item => (
-                        <div
-                        key={item.media_id}
-                        className={`trip-media-tile ${
-                            validSelectedMediaIds.includes(item.media_id)
-                                ? 'selected'
-                                : ''
-                        }`}
-
-                    >
-                        <Link
-                            href={`/photo/${item.media_id}?tripId=${trip.trip_id}`}
-                            scroll={false}
-                            className="photo-tile"
+                groupedMedia.map(
+                    ([title, items]) => (
+                        <section
+                            className="timeline-section"
+                            key={title}
                         >
-                            <Image
-                                src={`/api/media/${item.media_id}/thumbnail`}
-                                alt={item.file_name}
-                                fill
-                                unoptimized
-                                className="photo-img"
-                            />
-                        </Link>
+                            <div className="section-heading">
+                                <div>
+                                    <h2>
+                                        {title === 'All'
+                                            ? ''
+                                            : title}
+                                    </h2>
 
-                        <button
-                            type="button"
-                            className="trip-media-select"
-                            aria-label={`Select ${item.file_name}`}
-                            onClick={() => 
-                                toggleMediaSelection(item.media_id)
-                            }
-                        >
-                            {validSelectedMediaIds.includes(item.media_id)
-                                ? '✓'
-                                : ''}
-                        </button>
-                    </div>
-                    ))}
-                </div>
+                                    {title == 'All'
+                                        ? ''
+                                        : <p>
+                                            {items.length}{' '}
+                                            {items.length === 1
+                                                ? 'item'
+                                                : 'items'}
+                                        </p>}
+                                    
+                                </div>
+                            </div>
+
+                            <div className="photo-grid">
+                                {items.map(item => (
+                                    <div
+                                    key={item.media_id}
+                                    className={`trip-media-tile ${
+                                        validSelectedMediaIds.includes(item.media_id)
+                                            ? 'selected'
+                                            : ''
+                                    }`}
+
+                                >
+                                    <Link
+                                        href={`/photo/${item.media_id}?tripId=${trip.trip_id}`}
+                                        scroll={false}
+                                        className="photo-tile"
+                                    >
+                                        <Image
+                                            src={`/api/media/${item.media_id}/thumbnail`}
+                                            alt={item.file_name}
+                                            fill
+                                            unoptimized
+                                            className="photo-img"
+                                        />
+                                    </Link>
+
+                                    <button
+                                        type="button"
+                                        className="trip-media-select"
+                                        aria-label={`Select ${item.file_name}`}
+                                        onClick={() => 
+                                            toggleMediaSelection(item.media_id)
+                                        }
+                                    >
+                                        {validSelectedMediaIds.includes(item.media_id)
+                                            ? '✓'
+                                            : ''}
+                                    </button>
+                                </div>
+                                ))}
+                            </div>
+                            
+                        </section>
+                    )
+                )
+                
             )}
 
             <TripMediaPicker

@@ -46,7 +46,6 @@ type MediaDetails = {
     bitrate: number | null;
 };
 
-
 type TripMediaRow = {
     media_id: number;
     file_name: string;
@@ -58,7 +57,6 @@ type TripMediaRow = {
     favorite: boolean;
 };
 
-
 type TripResponse = {
     trip: {
         trip_id: number;
@@ -67,6 +65,19 @@ type TripResponse = {
     };
 
     media: TripMediaRow[];
+};
+
+export type LibraryMedia = {
+    media_id: number;
+    file_name: string;
+    file_type: 'IMAGE' | 'VIDEO';
+    date_taken: string | null;
+    date_imported: string;
+    width: number | null;
+    height: number | null;
+    favorite: boolean;
+    city_name: string | null;
+    country_name: string | null;
 };
 
 
@@ -924,4 +935,65 @@ function formatDuration(
     return `${minutes}:${remainingSeconds
         .toString()
         .padStart(2, '0')}`;
+}
+
+
+export function LibraryMediaGrid({
+    items,
+    density = 'comfortable',
+}: {
+    items: LibraryMedia[];
+    density?: string;
+}) {
+    return (
+        <div
+            className={`photo-grid ${
+                density === 'compact'
+                    ? 'compact'
+                    : ''
+            }`}
+        >
+            {items.map((item, index) => (
+                <Link
+                    key={item.media_id}
+                    href={`/photo/${item.media_id}`}
+                    scroll={false}
+                    className="photo-tile"
+                    aria-label={`View ${item.file_name}`}
+                >
+                    <Image
+                        src={`/api/media/${item.media_id}/thumbnail`}
+                        alt={item.file_name}
+                        fill
+                        sizes="(max-width: 700px) 50vw, (max-width: 1100px) 33vw, 25vw"
+                        unoptimized
+                        className="photo-img"
+                        priority={index < 3}
+                    />
+
+                    <span className="photo-overlay">
+                        <span>
+                            {item.file_name}
+
+                            <small>
+                                {item.city_name ??
+                                    item.country_name ??
+                                    ''}
+                            </small>
+                        </span>
+
+                        <Icon
+                            name="heart"
+                            size={18}
+                            className={
+                                item.favorite
+                                    ? 'is-favorite'
+                                    : ''
+                            }
+                        />
+                    </span>
+                </Link>
+            ))}
+        </div>
+    );
 }

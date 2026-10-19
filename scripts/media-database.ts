@@ -82,7 +82,18 @@ export type DeletedMediaRow = {
     path: string;
 };
 
-
+export type LibraryMediaRow = {
+    media_id: number;
+    file_name: string;
+    file_type: "IMAGE" | "VIDEO";
+    date_taken: Date | null;
+    date_imported: Date;
+    width: number | null;
+    height: number | null;
+    favorite: boolean;
+    city_name: string | null;
+    country_name: string | null;
+};
 
 
 const pool = new Pool({
@@ -728,8 +739,9 @@ export async function getAvailableMedia(): Promise<AvailableMediaRow[]> {
                 height
             FROM media
             WHERE trip_id IS NULL
-            ORDER BY date_taken DESC NULLS LAST,
-                     media_id DESC`
+            ORDER BY 
+                COALESCE(date_taken, date_imported) DESC,
+                media_id DESC`
         );
 
         return result.rows;
@@ -808,6 +820,42 @@ export async function deleteMediaById(
             );
 
         return result.rows[0];
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function getLibraryMedia():
+    Promise<LibraryMediaRow[]> {
+    const client = await pool.connect();
+
+    try {
+        const result =
+            await client.query<LibraryMediaRow>(
+                `SELECT
+                    m.media_id,
+                    m.file_name,
+                    m.file_type,
+                    m.date_taken,
+                    m.date_imported,
+                    m.width,
+                    m.height,
+                    m.favorite,
+                    c.city_name,
+                    co.country_name
+                 FROM media m
+                 LEFT JOIN city c
+                    ON m.city_id = c.city_id
+                 LEFT JOIN country co
+                    ON c.country_id = co.country_id
+                 ORDER BY
+                    COALESCE(date_taken, date_imported) DESC,
+                    m.media_id DESC`
+            );
+
+        return result.rows;
     }
     finally {
         client.release();

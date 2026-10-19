@@ -4,12 +4,23 @@ import {
     useEffect,
     useState,
 } from 'react';
-import {useSearchParams} from 'next/navigation';
-import type {Photo,TripCard} from '@/lib/types';
-import {albums,photos,trips} from '@/lib/mock-data';
-import {PhotoGrid} from './gallery';
-import {TripGrid,AlbumGrid} from './cards';
-import {Icon} from './icons';
+
+import { useSearchParams } from 'next/navigation';
+
+import type { TripCard } from '@/lib/types';
+import { albums, photos, trips } from '@/lib/mock-data';
+import {
+    type GroupMode,
+    groupMediaByDate
+} from '@/lib/media-grouping';
+
+import {
+    LibraryMediaGrid,
+    type LibraryMedia,
+    PhotoGrid,
+} from './gallery';
+import { TripGrid, AlbumGrid } from './cards';
+import { Icon } from './icons';
 import { CreateTripModal } from './create-trip-modal';
 
 
@@ -21,7 +32,259 @@ type TripApiRow = {
 };
 
 
-export function PhotosPage(){const [group,setGroup]=useState('Months');const [density,setDensity]=useState('comfortable');const sections:[string,string,Photo[]][]=group==='Months'?[['September 2026','Kyoto, Japan · 142 photos',photos.slice(0,6)],['August 2026','From Tokyo to the coast · 318 photos',photos.slice(6,14)],['July 2026','Little moments · 96 photos',photos.slice(14)]]:group==='Years'?[['2026','A year in photographs · 1,482 photos',photos]]:[['18 September 2026','Kyoto, Japan',photos.slice(0,4)],['17 September 2026','Kyoto, Japan',photos.slice(4,8)],['16 September 2026','Japan and beyond',photos.slice(8)]];return <><div className="eyebrow"><Icon name="sparkle" size={15}/> YOUR LIBRARY <span className="eyebrow-line"/></div><div className="page-heading home-heading"><div><h1>Photos</h1><p>Your memories, one moment at a time.</p></div><span className="photo-total">{photos.length.toLocaleString()} memories</span></div><div className="timeline-controls"><div className="segmented" aria-label="Group photos by">{['Years','Months','Days'].map(v=><button key={v} onClick={()=>setGroup(v)} className={group===v?'selected':''}>{v}</button>)}</div><div className="density-controls"><span>View</span><button className={density==='comfortable'?'selected':''} onClick={()=>setDensity('comfortable')} aria-label="Comfortable grid"><Icon name="grid" size={17}/></button><button className={density==='compact'?'selected':''} onClick={()=>setDensity('compact')} aria-label="Compact grid"><Icon name="sliders" size={17}/></button></div></div>{sections.map(([title,subtitle,items])=><section className="timeline-section" key={title}><div className="section-heading"><div><h2>{title}</h2><p>{subtitle}</p></div><button aria-label={`More options for ${title}`}><Icon name="more" size={20}/></button></div><PhotoGrid items={[...items]} density={density}/></section>)}</>}
+export function PhotosPage() {
+    const [media, setMedia] = useState<LibraryMedia[]>([]);
+
+    const [loading, setLoading] = useState(true);
+
+    const [error, setError] = useState<string | null>(null);
+
+    const [density, setDensity] = useState('comfortable');
+
+    const [group, setGroup] = useState<GroupMode>('Months');
+
+
+    useEffect(() => {
+        async function loadMedia() {
+            try {
+                const response = await fetch('/api/media?scope=all');
+
+                if (!response.ok) {
+                    throw new Error(
+                        `Failed to load library (${response.status})`
+                    );
+                }
+
+                const result = await response.json() as LibraryMedia[];
+
+                setMedia(result);
+            }
+            catch (error) {
+                setError(
+                    error instanceof Error
+                        ? error.message
+                        : 'Failed to load library'
+                );
+            }
+            finally {
+                setLoading(false);
+            }
+        }
+
+        void loadMedia();
+    }, []);
+
+
+    useEffect(() => {
+        function handleLibraryUpdated() {
+            async function reloadMedia() {
+                try {
+                    const response =
+                        await fetch(
+                            '/api/media?scope=all'
+                        );
+
+                    if (!response.ok) {
+                        return;
+                    }
+
+                    const result =
+                        await response.json() as LibraryMedia[];
+
+                    setMedia(result);
+                }
+                catch (error) {
+                    console.error(
+                        'Failed to refresh library:',
+                        error
+                    );
+                }
+            }
+
+            void reloadMedia();
+        }
+
+        window.addEventListener(
+            'media-library-updated',
+            handleLibraryUpdated
+        );
+
+        return () => {
+            window.removeEventListener(
+                'media-library-updated',
+                handleLibraryUpdated
+            );
+        };
+    }, []);
+
+    
+    const groupedSections = groupMediaByDate(media, group);
+
+    if (loading) {
+        return (
+            <div className="empty-state">
+                <h2>Loading library...</h2>
+            </div>
+        );
+    }
+
+
+    if (error) {
+        return (
+            <div className="empty-state">
+                <h2>
+                    Unable to load library
+                </h2>
+
+                <p>{error}</p>
+            </div>
+        );
+    }
+
+
+    return (
+        <>
+            <div className="eyebrow">
+                <Icon
+                    name="sparkle"
+                    size={15}
+                />
+                YOUR LIBRARY
+                <span className="eyebrow-line"/>
+            </div>
+
+
+            <div className="page-heading home-heading">
+                <div>
+                    <h1>Photos</h1>
+
+                    <p>
+                        Your memories, one moment at a time.
+                    </p>
+                </div>
+
+                <span className="photo-total">
+                    {media.length.toLocaleString()}{' '}
+                    {media.length === 1
+                        ? 'memory'
+                        : 'memories'}
+                </span>
+            </div>
+
+
+            <div className="timeline-controls">
+                <div
+                    className="segmented"
+                    aria-label="Group media by"
+                >
+                    {[
+                        'Years',
+                        'Months',
+                        'Days',
+                    ].map(value => (
+                        <button
+                            key={value}
+                            onClick={() =>
+                                setGroup(
+                                    value as
+                                        'Years' |
+                                        'Months' |
+                                        'Days'
+                                )
+                            }
+                            className={
+                                group === value
+                                    ? 'selected'
+                                    : ''
+                            }
+                        >
+                            {value}
+                        </button>
+                    ))}
+                </div>
+
+                <div className="density-controls">
+                    <button
+                        className={
+                            density === 'comfortable'
+                                ? 'selected'
+                                : ''
+                        }
+                        onClick={() =>
+                            setDensity(
+                                'comfortable'
+                            )
+                        }
+                        aria-label="Comfortable grid"
+                    >
+                        <Icon
+                            name="grid"
+                            size={17}
+                        />
+                    </button>
+
+                    <button
+                        className={
+                            density === 'compact'
+                                ? 'selected'
+                                : ''
+                        }
+                        onClick={() =>
+                            setDensity(
+                                'compact'
+                            )
+                        }
+                        aria-label="Compact grid"
+                    >
+                        <Icon
+                            name="sliders"
+                            size={17}
+                        />
+                    </button>
+                </div>
+            </div>
+
+
+            {media.length === 0 ? (
+                <EmptyState
+                    title="No media yet"
+                    text="Import some photos or videos to start your library."
+                />
+            ) : (
+                groupedSections.map(
+                    ([title, items]) => (
+                        <section
+                            className="timeline-section"
+                            key={title}
+                        >
+                            <div className="section-heading">
+                                <div>
+                                    <h2>
+                                        {title}
+                                    </h2>
+
+                                    <p>
+                                        {items.length}{' '}
+                                        {items.length === 1
+                                            ? 'item'
+                                            : 'items'}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <LibraryMediaGrid
+                                items={items}
+                                density={density}
+                            />
+                        </section>
+                    )
+                )
+            )}
+        </>
+    );
+}
+
+
 export function TripsPage() {
     const [trips, setTrips] = useState<TripApiRow[]>([]);
 
@@ -95,7 +358,14 @@ export function TripsPage() {
                 }}
             />
 
-            <TripGrid items={tripCards}/>
+            {tripCards.length === 0 ? (
+                <EmptyState
+                    title="No trips yet"
+                    text="Create trips to revisit your jounreys."
+                />
+            ) : (
+                <TripGrid items={tripCards}/>
+            )}
 
             <CreateTripModal
                 open={createTripOpen}
@@ -109,10 +379,13 @@ export function TripsPage() {
         </>
     );
 }
+
+
 export function AlbumsPage(){return <><PageHeading eyebrow="CURATED MOMENTS" title="Albums" subtitle="My collections" action="New Album"/><AlbumGrid items={albums}/></>}
 export function FavoritesPage(){return <><PageHeading eyebrow="CLOSE TO HEART" title="Favorites" subtitle="The moments you love most"/><PhotoGrid items={photos.filter(p=>p.favorite)}/></>}
 export function SearchPage(){const params=useSearchParams();const initial=params.get('q')||'';const [query,setQuery]=useState(initial);const [filter,setFilter]=useState('All');const q=query.toLowerCase().trim();const result=photos.filter(p=>!q||[p.title,p.location?.city,p.location?.country,...p.tags,p.camera?.model].some(s=>s?.toLowerCase().includes(q)));return <><PageHeading eyebrow="DISCOVER" title="Search" subtitle="Find any trip, moment, or memory"/><div className="search-hero"><Icon name="search" size={24}/><input aria-label="Search library" autoFocus value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search photos, trips, or anything..."/><span>↵</span></div><div className="filter-row">{['All','Photos','Trips','Albums','Videos'].map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}</div>{!q&&<div className="suggestions"><span>TRY SEARCHING FOR</span>{['Kyoto temples','Singapore','Sony A7 III','Nature','Iceland'].map(s=><button key={s} onClick={()=>setQuery(s)}><Icon name="search" size={14}/>{s}</button>)}</div>}<div className="results-heading"><h2>{q?`Results for “${query}”`:'Explore your library'}</h2><span>{filter==='All'||filter==='Photos'?result.length:filter==='Trips'?trips.length:filter==='Albums'?albums.length:0} results</span></div>{filter==='Trips'?<TripGrid items={trips.filter(t=>!q||t.name.toLowerCase().includes(q)||t.places.toLowerCase().includes(q))}/>:filter==='Albums'?<AlbumGrid items={albums.filter(a=>!q||a.name.toLowerCase().includes(q))}/>:filter==='Videos'?<EmptyState title="No videos yet" text="Videos will appear here when your library is connected."/>:result.length?<PhotoGrid items={result}/>:<EmptyState title="No matches found" text="Try another trip, subject, or camera name."/>}</>}
 export function SimplePage({kind}:{kind:'Recently Added'|'Videos'|'Screenshots'|'Trash'}){const items=kind==='Recently Added'?photos.slice(0,8):[];return <><PageHeading eyebrow="YOUR LIBRARY" title={kind} subtitle={kind==='Recently Added'?'The newest moments in your library':`${kind} in your library`}/>{items.length?<PhotoGrid items={items}/>:<EmptyState title={`No ${kind.toLowerCase()} yet`} text="Your collection will appear here when your library is connected."/>}</>}
+
 function PageHeading({
     eyebrow,
     title,
@@ -153,4 +426,26 @@ function PageHeading({
         </>
     );
 }
-function EmptyState({title,text}:{title:string;text:string}){return <div className="empty-state"><Icon name="photos" size={36}/><h2>{title}</h2><p>{text}</p></div>}
+
+
+function getMediaDate(item: LibraryMedia): Date {
+    return new Date(
+        item.date_taken ?? item.date_imported
+    );
+}
+
+
+function EmptyState({
+    title,
+    text,
+}: {
+    title: string;
+    text: string;
+}) {
+    return (
+        <div className="empty-state">
+            <h2>{title}</h2>
+            <p>{text}</p>
+        </div>
+    );
+}

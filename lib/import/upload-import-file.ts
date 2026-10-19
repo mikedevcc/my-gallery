@@ -42,6 +42,14 @@ export async function uploadImportFile(
         `Job ${jobId} imported as media ID ${data.mediaId}`
     );
 
+    window.dispatchEvent(
+        new CustomEvent('media-library-updated', {
+            detail: {
+                mediaId: data.mediaId,
+            },
+        })
+    );
+
     return {
         type: "COMPLETED",
     };
