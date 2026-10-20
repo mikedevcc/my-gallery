@@ -260,6 +260,33 @@ export function TripDetail({
     }
 
 
+    async function toggleFavoriteMedia(
+        mediaId: number,
+        favoriteState: boolean
+    ) {
+        const response = await fetch(
+            `/api/media/${mediaId}`,
+            {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    favorite: favoriteState,
+                }),
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error(
+                `Failed to toggle favorite: ${mediaId}`
+            );
+        }
+
+        await refreshTrip();
+    }
+
+
     return (
         <>
             <div className="trip-hero">
@@ -488,7 +515,36 @@ export function TripDetail({
                                             unoptimized
                                             className="photo-img"
                                         />
+                                        
+                                        <span className="photo-overlay">
+                                            <span>
+                                                {item.file_name}
+                                            </span>
+                                        </span>
                                     </Link>
+
+                                    <button
+                                        type="button"
+                                        className={
+                                            item.favorite
+                                                ? 'photo-favorite is-favorite'
+                                                : 'photo-favorite'
+                                        }
+                                        onClick={(event) => {
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            
+                                            void toggleFavoriteMedia(
+                                                item.media_id, 
+                                                !item.favorite,
+                                            );
+                                        }}
+                                    >
+                                        <Icon
+                                            name="heart"
+                                            size={18}
+                                        />
+                                    </button>
 
                                     <button
                                         type="button"

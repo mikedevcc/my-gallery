@@ -600,7 +600,9 @@ export async function getMediaByTripId(
                 favorite
              FROM media
              WHERE trip_id = $1
-             ORDER BY date_taken ASC NULLS LAST`,
+             ORDER BY
+                COALESCE(date_taken, date_imported) DESC,
+                media_id DESC`,
             [tripId]
         );
 
@@ -1187,6 +1189,28 @@ export async function copyMediaToAlbum(
                 mediaIds,
             ]
         );
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function setMediaFavorite(
+    mediaId: number,
+    favorite: boolean
+): Promise<boolean> {
+    const client = await pool.connect();
+
+    try {
+        const result = await client.query(
+            `UPDATE media
+             SET favorite = $2
+             WHERE media_id = $1`,
+            [mediaId, favorite]
+        );
+
+        return result.rowCount === 1;
     }
     finally {
         client.release();

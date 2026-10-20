@@ -1,4 +1,4 @@
-import { getMediaDetailsById } from "@/scripts/media-database";
+import { getMediaDetailsById, setMediaFavorite } from "@/scripts/media-database";
 import { deleteMediaById } from "@/scripts/media-database";
 import { deleteStoredMedia } from "@/scripts/media-storage";
 import { deleteThumbnail } from "@/scripts/media-thumbnail";
@@ -8,13 +8,16 @@ type RouteContext = {
     params: Promise<{ mediaId: string }>;
 };
 
+type FavoriteRequest = {
+    favorite: boolean
+}
+
 
 export async function GET(
     _request: Request,
     context: RouteContext
 ) {
     const { mediaId } = await context.params;
-
     const parsedMediaId = Number(mediaId);
 
     if (
@@ -47,11 +50,8 @@ export async function DELETE(
     _request: Request,
     context: RouteContext
 ) {
-    const { mediaId } =
-        await context.params;
-
-    const parsedMediaId =
-        Number(mediaId);
+    const { mediaId } = await context.params;
+    const parsedMediaId = Number(mediaId);
 
     if (
         !Number.isInteger(parsedMediaId) ||
@@ -63,10 +63,7 @@ export async function DELETE(
         );
     }
 
-    const deleted =
-        await deleteMediaById(
-            parsedMediaId
-        );
+    const deleted = await deleteMediaById(parsedMediaId);
 
     if (!deleted) {
         return Response.json(
@@ -75,15 +72,55 @@ export async function DELETE(
         );
     }
 
-    await deleteStoredMedia(
-        deleted.path
-    );
+    await deleteStoredMedia(deleted.path);
 
-    await deleteThumbnail(
-        deleted.media_id
-    );
+    await deleteThumbnail(deleted.media_id);
 
-    return Response.json({
-        message: 'Media deleted',
-    });
+    return Response.json({message: 'Media deleted',});
+}
+
+
+export async function PATCH(
+    request: Request,
+    context: RouteContext
+) {
+    const { mediaId } = await context.params;
+    const parsedMediaId = Number(mediaId);
+
+    if (
+        !Number.isInteger(parsedMediaId) ||
+        parsedMediaId <= 0
+    ) {
+        return Response.json(
+            { error: 'Invalid media ID' },
+            { status: 400 }
+        );
+    }
+
+    const body = await request.json() as FavoriteRequest; 
+    const favoriteState = body.favorite;
+
+    if (typeof favoriteState !== 'boolean') {
+        return Response.json(
+            { error: 'Invalid favorite state' },
+            { status: 400 }
+        );
+    }
+
+    const success = await setMediaFavorite(parsedMediaId, favoriteState);
+
+    if (!success) {
+        return Response.json(
+            { error: "Favorite change failed" },
+            { status: 400 }
+        )
+    }
+
+    return Response.json(
+        {
+            message: "Favorite changed successfully",
+            mediaId: parsedMediaId,
+        },
+        { status: 200 }
+    )
 }
