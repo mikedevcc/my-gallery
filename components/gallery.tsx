@@ -941,9 +941,14 @@ function formatDuration(
 export function LibraryMediaGrid({
     items,
     density = 'comfortable',
+    onToggleFavorite,
 }: {
     items: LibraryMedia[];
     density?: string;
+    onToggleFavorite: (
+        mediaId: number,
+        favoriteState: boolean
+    ) => void;
 }) {
     return (
         <div
@@ -954,45 +959,62 @@ export function LibraryMediaGrid({
             }`}
         >
             {items.map((item, index) => (
-                <Link
+                <div
                     key={item.media_id}
-                    href={`/photo/${item.media_id}`}
-                    scroll={false}
-                    className="photo-tile"
-                    aria-label={`View ${item.file_name}`}
+                    className="photo-library-tile"
                 >
-                    <Image
-                        src={`/api/media/${item.media_id}/thumbnail`}
-                        alt={item.file_name}
-                        fill
-                        sizes="(max-width: 700px) 50vw, (max-width: 1100px) 33vw, 25vw"
-                        unoptimized
-                        className="photo-img"
-                        priority={index < 3}
-                    />
+                    <Link
+                        href={`/photo/${item.media_id}`}
+                        scroll={false}
+                        className="photo-tile"
+                        aria-label={`View ${item.file_name}`}
+                    >
+                        <Image
+                            src={`/api/media/${item.media_id}/thumbnail`}
+                            alt={item.file_name}
+                            fill
+                            sizes="(max-width: 700px) 50vw, (max-width: 1100px) 33vw, 25vw"
+                            unoptimized
+                            className="photo-img"
+                            priority={index < 3}
+                        />
 
-                    <span className="photo-overlay">
-                        <span>
-                            {item.file_name}
+                        <span className="photo-overlay">
+                            <span>
+                                {item.file_name}
 
-                            <small>
-                                {item.city_name ??
-                                    item.country_name ??
-                                    ''}
-                            </small>
+                                <small>
+                                    {item.city_name ??
+                                        item.country_name ??
+                                        ''}
+                                </small>
+                            </span>
                         </span>
+                    </Link>
 
+                    <button
+                        type="button"
+                        className={
+                            item.favorite
+                                ? 'photo-favorite is-favorite'
+                                : 'photo-favorite'
+                        }
+                        onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+
+                            onToggleFavorite(
+                                item.media_id,
+                                !item.favorite
+                            );
+                        }}
+                    >
                         <Icon
                             name="heart"
                             size={18}
-                            className={
-                                item.favorite
-                                    ? 'is-favorite'
-                                    : ''
-                            }
                         />
-                    </span>
-                </Link>
+                    </button>
+                </div>
             ))}
         </div>
     );

@@ -56,6 +56,41 @@ export function PhotosPage() {
     const [group, setGroup] = useState<GroupMode>('Months');
 
 
+    async function toggleFavoriteMedia(
+        mediaId: number,
+        favoriteState: boolean
+    ) {
+        const response = await fetch(
+            `/api/media/${mediaId}`,
+            {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    favorite: favoriteState,
+                }),
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error(
+                `Failed to toggle favorite: ${mediaId}`
+            );
+        }
+
+        setMedia(current =>
+            current.map(item =>
+                item.media_id === mediaId
+                    ? {
+                        ...item,
+                        favorite: favoriteState,
+                    }
+                    : item
+            )
+        );
+    }
+
     useEffect(() => {
         async function loadMedia() {
             try {
@@ -247,6 +282,7 @@ export function PhotosPage() {
                             <LibraryMediaGrid
                                 items={items}
                                 density={density}
+                                onToggleFavorite={toggleFavoriteMedia}
                             />
                         </section>
                     )
