@@ -1,7 +1,15 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import type {Album, TripCard} from '@/lib/types';
-import {Icon} from './icons';
+
+import type {
+    // Album,
+    AlbumCard,
+    TripCard,
+} from '@/lib/types';
+
+import { Icon } from './icons';
+
+
 export function TripGrid({items}:{items:TripCard[]}) {
     return (
         <div className="card-grid trip-grid">
@@ -44,4 +52,47 @@ export function TripGrid({items}:{items:TripCard[]}) {
         </div>
     );
 }
-export function AlbumGrid({items}:{items:Album[]}){return <div className="card-grid album-grid">{items.map(album=><Link className="collection-card" href={album.slug==='favorites'?'/favorites':album.slug==='videos'?'/videos':`/search?q=${encodeURIComponent(album.name)}`} key={album.slug}><div className="card-image"><Image src={album.cover} alt={album.name} fill sizes="(max-width: 700px) 50vw, 25vw" unoptimized/></div><div className="card-body"><h2>{album.name}</h2><p>{album.count.toLocaleString()} {album.name==='Videos'?'items':'photos'}</p></div></Link>)}</div>}
+// export function AlbumGrid({items}:{items:Album[]}){return <div className="card-grid album-grid">{items.map(album=><Link className="collection-card" href={album.slug==='favorites'?'/favorites':album.slug==='videos'?'/videos':`/search?q=${encodeURIComponent(album.name)}`} key={album.slug}><div className="card-image"><Image src={album.cover} alt={album.name} fill sizes="(max-width: 700px) 50vw, 25vw" unoptimized/></div><div className="card-body"><h2>{album.name}</h2><p>{album.count.toLocaleString()} {album.name==='Videos'?'items':'photos'}</p></div></Link>)}</div>}
+
+export function AlbumGrid({items}:{items:AlbumCard[]}) {
+    return (
+        <div className="card-grid album-grid">
+            {items.map(album => (
+                <Link
+                    className="collection-card album-card"
+                    href={`/albums/${album.slug}`}
+                    key={album.id}
+                >
+                    <div className="card-image">
+                        {album.cover && (
+                            <Image
+                                src={album.cover}
+                                alt={album.name}
+                                fill
+                                sizes="(max-width: 700px) 100vw, 33vw"
+                                unoptimized
+                            />
+                        )}
+
+                        <div className="album-shade">
+                            {album.places && (
+                                <span className="trip-kicker">
+                                    <Icon name="places" size={16}/>
+                                    {album.places}
+                                </span>
+                            )}
+
+                            <h2>{album.name}</h2>
+
+                            <span className="album-overlay-meta">
+                                {album.dates ?? "No dates yet"}
+                                <span className="meta-dot"/>
+                                {album.count.toLocaleString()} photos
+                            </span>
+                        </div>
+                    </div>
+                </Link>
+            ))}
+        </div>
+    );
+}

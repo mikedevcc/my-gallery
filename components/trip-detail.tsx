@@ -6,14 +6,11 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from 'next/navigation';
 
-import {
-    type GroupMode,
-    groupMediaByDate
-} from '@/lib/media-grouping';
+import { groupMediaByDate } from '@/lib/media-grouping';
 
 import { Icon } from './icons';
 import { TripMediaPicker } from './trip-media-picker';
-import { MoveMediaModal } from './move-media-modal';
+import { MoveTripMediaModal } from './move-media-modal';
 import { DeleteMediaModal } from './delete-media-modal';
 
 
@@ -41,15 +38,14 @@ type TripResponse = {
 
 
 export function TripDetail({
-    slug,
+    tripId,
 }: {
-    slug: string;
+    tripId: string;
 }) {
     const [data, setData] = useState<TripResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    const [tab, setTab] = useState('Overview');
     const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
 
     const [selectedMediaIds, setSelectedMediaIds] =
@@ -58,14 +54,14 @@ export function TripDetail({
                 return [];
             }
 
-            const stored =
-                sessionStorage.getItem(
-                    `trip-selection:${slug}`
-                );
+            const key = `trip-selection:${tripId}`;
+            const stored = sessionStorage.getItem(key);
 
             if (!stored) {
                 return [];
             }
+
+            sessionStorage.removeItem(key);
 
             try {
                 return JSON.parse(stored) as number[];
@@ -80,20 +76,10 @@ export function TripDetail({
 
     const [group, setGroup] = useState<'All' | 'Days'>('All');
 
-    const selectionStorageKey = `trip-selection:${slug}`;
 
     const router = useRouter();
 
-    
-    useEffect(() => {
-        sessionStorage.setItem(
-            selectionStorageKey,
-            JSON.stringify(selectedMediaIds)
-        );
-    }, [
-        selectionStorageKey,
-        selectedMediaIds,
-    ]);
+    const selectionStorageKey = `trip-selection:${tripId}`;
 
 
     function toggleMediaSelection(mediaId: number) {
@@ -106,9 +92,11 @@ export function TripDetail({
 
 
     async function refreshTrip() {
+        setError(null);
+
         try {
             const response =
-                await fetch(`/api/trips/${slug}`);
+                await fetch(`/api/trips/${tripId}`);
 
             if (!response.ok) {
                 throw new Error(
@@ -116,8 +104,7 @@ export function TripDetail({
                 );
             }
 
-            const result =
-                await response.json() as TripResponse;
+            const result = await response.json() as TripResponse;
 
             setData(result);
         }
@@ -183,7 +170,7 @@ export function TripDetail({
     useEffect(() => {
         async function loadTrip() {
             try {
-                const response = await fetch(`/api/trips/${slug}`);
+                const response = await fetch(`/api/trips/${tripId}`);
 
                 if (!response.ok) {
                     throw new Error(
@@ -209,7 +196,7 @@ export function TripDetail({
         }
 
         void loadTrip();
-    }, [slug]);
+    }, [tripId]);
 
 
     if (loading) {
@@ -427,25 +414,15 @@ export function TripDetail({
 
 
             <div className="section-heading detail-section">
-                <div>
-                    <h2>
-                        {tab === 'Photos'
-                            ? 'All photos'
-                            : tab === 'Timeline'
-                                ? 'Moments along the way'
-                                : 'The story so far'}
-                    </h2>
-
-                    <p>
-                        {media.length === 0
-                            ? 'No media has been added to this trip yet.'
-                            : `${media.length} ${
-                                media.length === 1
-                                    ? 'memory'
-                                    : 'memories'
-                            } in this trip`}
-                    </p>
-                </div>
+                <p>
+                    {media.length === 0
+                        ? 'No media has been added to this trip yet.'
+                        : `${media.length} ${
+                            media.length === 1
+                                ? 'memory'
+                                : 'memories'
+                        } in this trip`}
+                </p>
             </div>
 
 
@@ -464,40 +441,45 @@ export function TripDetail({
                 </div>
             ) : (
                 groupedMedia.map(([title, items]) => (
-                        <section
-                            className="timeline-section"
-                            key={title}
-                        >
-                            {title !== 'All' && (
-                                <div className="section-heading">
-                                    <div>
-                                        <h2>{title}</h2>
+                    <section
+                        className="timeline-section"
+                        key={title}
+                    >
+                        {title !== 'All' && (
+                            <div className="section-heading">
+                                <div>
+                                    <h2>{title}</h2>
 
-                                        <p>
-                                            {items.length}{' '}
-                                            {items.length === 1
-                                                ? 'item'
-                                                : 'items'}
-                                        </p>
-                                    </div>
+                                    <p>
+                                        {items.length}{' '}
+                                        {items.length === 1
+                                            ? 'item'
+                                            : 'items'}
+                                    </p>
                                 </div>
-                            )}
+                            </div>
+                        )}
 
-                            <div className="photo-grid">
-                                {items.map(item => (
-                                    <div
+                        <div className="photo-grid">
+                            {items.map(item => (
+                                <div
                                     key={item.media_id}
                                     className={`trip-media-tile ${
                                         validSelectedMediaIds.includes(item.media_id)
                                             ? 'selected'
                                             : ''
                                     }`}
-
                                 >
                                     <Link
                                         href={`/photo/${item.media_id}?tripId=${trip.trip_id}`}
                                         scroll={false}
                                         className="photo-tile"
+                                        onClick={() => {
+                                            sessionStorage.setItem(
+                                                selectionStorageKey,
+                                                JSON.stringify(validSelectedMediaIds)
+                                            );
+                                        }}
                                     >
                                         <Image
                                             src={`/api/media/${item.media_id}/thumbnail`}
@@ -521,12 +503,11 @@ export function TripDetail({
                                             : ''}
                                     </button>
                                 </div>
-                                ))}
-                            </div>
-                            
-                        </section>
-                    )
-                )
+                            ))}
+                        </div>
+                        
+                    </section>
+                ))
                 
             )}
 
@@ -541,7 +522,7 @@ export function TripDetail({
                 }}
             />
 
-            <MoveMediaModal
+            <MoveTripMediaModal
                 open={moveModalOpen}
                 sourceTripId={trip.trip_id}
                 mediaIds={selectedMediaIds}

@@ -137,6 +137,13 @@ export async function PATCH(
         );
     }
 
+    if (new Set(mediaIds).size !== mediaIds.length) {
+        return Response.json(
+            { error: "Duplicate media IDs" },
+            { status: 400 }
+        );
+    }
+
     if (
         !Number.isInteger(sourceTripId) ||
         sourceTripId <= 0

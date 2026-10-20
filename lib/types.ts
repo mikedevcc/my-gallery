@@ -8,4 +8,13 @@ export type TripCard = {
     dates?: string;
     count: number;
 };
-export type Album = {slug:string;name:string;count:number;cover:string};
+// export type Album = {slug:string;name:string;count:number;cover:string};
+export type AlbumCard = {
+    id: number;
+    slug: string;
+    name: string;
+    cover?: string;
+    places?: string;
+    dates?: string;
+    count: number;
+};

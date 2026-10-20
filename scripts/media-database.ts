@@ -32,6 +32,17 @@ type TripMediaRow = {
     favorite: boolean;
 };
 
+type AlbumMediaRow = {
+    media_id: number;
+    file_name: string;
+    file_type: "IMAGE" | "VIDEO";
+    path: string;
+    date_taken: Date | null;
+    width: number | null;
+    height: number | null;
+    favorite: boolean;
+}
+
 export type MediaFileRow = {
     media_id: number;
     file_name: string;
@@ -816,8 +827,7 @@ export async function deleteMediaById(
     const client = await pool.connect();
 
     try {
-        const result =
-            await client.query<DeletedMediaRow>(
+        const result = await client.query<DeletedMediaRow>(
                 `DELETE FROM media
                  WHERE media_id = $1
                  RETURNING
@@ -839,8 +849,7 @@ export async function getLibraryMedia():
     const client = await pool.connect();
 
     try {
-        const result =
-            await client.query<LibraryMediaRow>(
+        const result = await client.query<LibraryMediaRow>(
                 `SELECT
                     m.media_id,
                     m.file_name,
@@ -879,8 +888,8 @@ export async function getAlbums(): Promise<AlbumRow[]> {
                 a.album_id,
                 a.album_name,
                 a.cover_media_id,
-                COUNT(m.media_id)::int AS media_count
-            FROM ablum a
+                COUNT(ma.media_id)::int AS media_count
+            FROM album a
             LEFT JOIN media_album ma
                 ON ma.album_id = a.album_id
             GROUP BY 
@@ -888,11 +897,298 @@ export async function getAlbums(): Promise<AlbumRow[]> {
                 a.album_name,
                 a.cover_media_id
             ORDER BY
-                a.album_id DESC`);
+                a.album_id DESC`
+        );
         
         return result.rows;
     }
     finally {
-        client.release()
+        client.release();
+    }
+}
+
+
+export async function createAlbum(
+    albumName: string
+): Promise<number> {
+    const client = await pool.connect();
+
+    try {
+        const result = await client.query<{ album_id: number }>(
+                `INSERT INTO album (
+                    album_name
+                 )
+                 VALUES ($1)
+                 RETURNING album_id`,
+                [albumName]
+            );
+
+        return result.rows[0].album_id;
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function getAlbumById(
+    albumId: number
+): Promise<AlbumRow | undefined> {
+    const client = await pool.connect();
+
+    try {
+        const result = await client.query<AlbumRow>(
+            `SELECT
+                album_id,
+                album_name,
+                cover_media_id
+             FROM album
+             WHERE album_id = $1`,
+            [albumId]
+        );
+
+        return result.rows[0];
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function getMediaByAlbumId(
+    albumId: number
+): Promise<AlbumMediaRow[]> {
+    const client = await pool.connect();
+
+    try {
+        const result = await client.query<AlbumMediaRow>(
+            `SELECT
+                m.media_id,
+                m.file_name,
+                m.file_type,
+                m.path,
+                m.date_taken,
+                m.date_imported,
+                m.width,
+                m.height,
+                m.favorite
+             FROM media m
+             INNER JOIN media_album ma
+                ON ma.media_id = m.media_id
+             WHERE ma.album_id = $1
+             ORDER BY
+                COALESCE(m.date_taken, m.date_imported) DESC,
+                m.media_id DESC`,
+            [albumId]
+        );
+
+        return result.rows;
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function addMediaToAlbum(
+    mediaId: number,
+    albumId: number
+): Promise<void> {
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        await client.query(
+            `INSERT INTO media_album (
+                media_id,
+                album_id
+             )
+             VALUES ($1, $2)
+             ON CONFLICT (media_id, album_id)
+             DO NOTHING`,
+            [mediaId, albumId]
+        );
+
+        await client.query(
+            `UPDATE album
+             SET cover_media_id = (
+                 SELECT MIN(media_id)
+                 FROM media_album
+                 WHERE album_id = $1
+             )
+             WHERE album_id = $1
+               AND cover_media_id IS NULL`,
+            [albumId]
+        );
+
+        await client.query('COMMIT');
+    }
+    catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function removeMediaFromAlbum(
+    mediaId: number,
+    albumId: number
+): Promise<boolean> {
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        const result = await client.query(
+            `DELETE FROM media_album
+             WHERE media_id = $1
+               AND album_id = $2`,
+            [mediaId, albumId]
+        );
+
+        if (result.rowCount !== 1) {
+            await client.query('ROLLBACK');
+            return false;
+        }
+
+        await client.query(
+            `UPDATE album
+             SET cover_media_id = (
+                 SELECT MIN(media_id)
+                 FROM media_album
+                 WHERE album_id = $1
+             )
+             WHERE album_id = $1
+               AND cover_media_id = $2`,
+            [albumId, mediaId]
+        );
+
+        await client.query('COMMIT');
+
+        return true;
+    }
+    catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function moveMediaToAlbum(
+    mediaIds: number[],
+    sourceAlbumId: number,
+    targetAlbumId: number
+): Promise<void> {
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        await client.query(
+            `INSERT INTO media_album (
+                media_id,
+                album_id
+             )
+             SELECT
+                media_id,
+                $1
+             FROM media_album
+             WHERE album_id = $2
+               AND media_id = ANY($3::int[])
+             ON CONFLICT (media_id, album_id)
+             DO NOTHING`,
+            [
+                targetAlbumId,
+                sourceAlbumId,
+                mediaIds,
+            ]
+        );
+
+        await client.query(
+            `DELETE FROM media_album
+             WHERE album_id = $1
+               AND media_id = ANY($2::int[])`,
+            [
+                sourceAlbumId,
+                mediaIds,
+            ]
+        );
+
+        await client.query(
+            `UPDATE album
+             SET cover_media_id = (
+                SELECT MIN(media_id)
+                FROM media_album
+                WHERE album_id = $1
+             )
+             WHERE album_id = $1
+             AND cover_media_id = ANY($2::int[]);`,
+             [
+                sourceAlbumId,
+                mediaIds,
+             ]
+        )
+
+        await client.query(
+            `UPDATE album
+             SET cover_media_id = (
+                SELECT MIN(media_id)
+                FROM media_album
+                WHERE album_id = $1
+             )
+             WHERE album_id = $1
+                AND cover_media_id IS NULL`,
+            [targetAlbumId]
+        );
+
+        await client.query('COMMIT');
+    }
+    catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function copyMediaToAlbum(
+    mediaIds: number[],
+    sourceAlbumId: number,
+    targetAlbumId: number
+): Promise<void> {
+    const client = await pool.connect();
+
+    try {
+        await client.query(
+            `INSERT INTO media_album (
+                media_id,
+                album_id
+             )
+             SELECT
+                media_id,
+                $1
+             FROM media_album
+             WHERE album_id = $2
+               AND media_id = ANY($3::int[])
+             ON CONFLICT (media_id, album_id)
+             DO NOTHING`,
+            [
+                targetAlbumId,
+                sourceAlbumId,
+                mediaIds,
+            ]
+        );
+    }
+    finally {
+        client.release();
     }
 }

@@ -7,7 +7,10 @@ import {
 
 import { useSearchParams } from 'next/navigation';
 
-import type { TripCard } from '@/lib/types';
+import type {
+    TripCard,
+    AlbumCard,
+} from '@/lib/types';
 import { albums, photos, trips } from '@/lib/mock-data';
 import {
     type GroupMode,
@@ -22,11 +25,20 @@ import {
 import { TripGrid, AlbumGrid } from './cards';
 import { Icon } from './icons';
 import { CreateTripModal } from './create-trip-modal';
+import { CreateAlbumModal } from './create-album-modal';
 
 
 type TripApiRow = {
     trip_id: number;
     trip_name: string;
+    media_count: number;
+    cover_media_id: number | null;
+};
+
+
+type AlbumApiRow = {
+    album_id: number;
+    album_name: string;
     media_count: number;
     cover_media_id: number | null;
 };
@@ -162,13 +174,6 @@ export function PhotosPage() {
                         Your memories, one moment at a time.
                     </p>
                 </div>
-
-                <span className="photo-total">
-                    {media.length.toLocaleString()}{' '}
-                    {media.length === 1
-                        ? 'memory'
-                        : 'memories'}
-                </span>
             </div>
 
 
@@ -203,45 +208,12 @@ export function PhotosPage() {
                     ))}
                 </div>
 
-                <div className="density-controls">
-                    <button
-                        className={
-                            density === 'comfortable'
-                                ? 'selected'
-                                : ''
-                        }
-                        onClick={() =>
-                            setDensity(
-                                'comfortable'
-                            )
-                        }
-                        aria-label="Comfortable grid"
-                    >
-                        <Icon
-                            name="grid"
-                            size={17}
-                        />
-                    </button>
-
-                    <button
-                        className={
-                            density === 'compact'
-                                ? 'selected'
-                                : ''
-                        }
-                        onClick={() =>
-                            setDensity(
-                                'compact'
-                            )
-                        }
-                        aria-label="Compact grid"
-                    >
-                        <Icon
-                            name="sliders"
-                            size={17}
-                        />
-                    </button>
-                </div>
+                <span className="photo-total">
+                    {media.length.toLocaleString()}{' '}
+                    {media.length === 1
+                        ? 'memory'
+                        : 'memories'}
+                </span>
             </div>
 
 
@@ -381,10 +353,106 @@ export function TripsPage() {
 }
 
 
-export function AlbumsPage(){return <><PageHeading eyebrow="CURATED MOMENTS" title="Albums" subtitle="My collections" action="New Album"/><AlbumGrid items={albums}/></>}
+export function AlbumsPage() {
+    const [albums, setAlbums] = useState<AlbumApiRow[]>([]);
+
+    const [loading, setLoading] = useState(true);
+
+    const [createAlbumOpen, setCreateAlbumOpen] = useState(false);
+
+
+    async function loadAlbums() {
+        try {
+            const response = await fetch('/api/albums');
+
+            if (!response.ok) {
+                throw new Error(
+                    'Failed to load albums'
+                );
+            }
+
+            const data = await response.json() as AlbumApiRow[];
+
+            setAlbums(data);
+        }
+        catch (error) {
+            console.error(
+                'Failed to load albums:',
+                error
+            );
+        }
+        finally {
+            setLoading(false);
+        }
+    }
+
+
+    useEffect(() => {
+        async function initialLoad() {
+            await loadAlbums();
+        }
+
+        void initialLoad();
+    }, []);
+
+
+    const albumCards: AlbumCard[] =
+        albums.map(album => ({
+            id: album.album_id,
+            slug: String(album.album_id),
+            name: album.album_name,
+            count: album.media_count,
+            cover:
+                album.cover_media_id !== null
+                    ? `/api/media/${album.cover_media_id}/thumbnail`
+                    : undefined,
+        }));
+
+
+    if (loading) {
+        return <p>Loading albums...</p>;
+    }
+
+
+    return (
+        <>
+            <PageHeading
+                eyebrow="YOUR COLLECTIONS"
+                title="Albums"
+                subtitle="Organize your favorite moments into collections"
+                action="New Album"
+                onAction={() => {
+                    setCreateAlbumOpen(true);
+                }}
+            />
+
+            {albumCards.length === 0 ? (
+                <EmptyState
+                    title="No albums yet"
+                    text="Create an album to organize your media."
+                />
+            ) : (
+                <AlbumGrid items={albumCards}/>
+            )}
+
+            <CreateAlbumModal
+                open={createAlbumOpen}
+                onClose={() => {
+                    setCreateAlbumOpen(false);
+                }}
+                onCreated={() => {
+                    void loadAlbums();
+                }}
+            />
+        </>
+    );
+}
+
+
 export function FavoritesPage(){return <><PageHeading eyebrow="CLOSE TO HEART" title="Favorites" subtitle="The moments you love most"/><PhotoGrid items={photos.filter(p=>p.favorite)}/></>}
 export function SearchPage(){const params=useSearchParams();const initial=params.get('q')||'';const [query,setQuery]=useState(initial);const [filter,setFilter]=useState('All');const q=query.toLowerCase().trim();const result=photos.filter(p=>!q||[p.title,p.location?.city,p.location?.country,...p.tags,p.camera?.model].some(s=>s?.toLowerCase().includes(q)));return <><PageHeading eyebrow="DISCOVER" title="Search" subtitle="Find any trip, moment, or memory"/><div className="search-hero"><Icon name="search" size={24}/><input aria-label="Search library" autoFocus value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search photos, trips, or anything..."/><span>↵</span></div><div className="filter-row">{['All','Photos','Trips','Albums','Videos'].map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}</div>{!q&&<div className="suggestions"><span>TRY SEARCHING FOR</span>{['Kyoto temples','Singapore','Sony A7 III','Nature','Iceland'].map(s=><button key={s} onClick={()=>setQuery(s)}><Icon name="search" size={14}/>{s}</button>)}</div>}<div className="results-heading"><h2>{q?`Results for “${query}”`:'Explore your library'}</h2><span>{filter==='All'||filter==='Photos'?result.length:filter==='Trips'?trips.length:filter==='Albums'?albums.length:0} results</span></div>{filter==='Trips'?<TripGrid items={trips.filter(t=>!q||t.name.toLowerCase().includes(q)||t.places.toLowerCase().includes(q))}/>:filter==='Albums'?<AlbumGrid items={albums.filter(a=>!q||a.name.toLowerCase().includes(q))}/>:filter==='Videos'?<EmptyState title="No videos yet" text="Videos will appear here when your library is connected."/>:result.length?<PhotoGrid items={result}/>:<EmptyState title="No matches found" text="Try another trip, subject, or camera name."/>}</>}
 export function SimplePage({kind}:{kind:'Recently Added'|'Videos'|'Screenshots'|'Trash'}){const items=kind==='Recently Added'?photos.slice(0,8):[];return <><PageHeading eyebrow="YOUR LIBRARY" title={kind} subtitle={kind==='Recently Added'?'The newest moments in your library':`${kind} in your library`}/>{items.length?<PhotoGrid items={items}/>:<EmptyState title={`No ${kind.toLowerCase()} yet`} text="Your collection will appear here when your library is connected."/>}</>}
+
 
 function PageHeading({
     eyebrow,
@@ -424,13 +492,6 @@ function PageHeading({
                 )}
             </div>
         </>
-    );
-}
-
-
-function getMediaDate(item: LibraryMedia): Date {
-    return new Date(
-        item.date_taken ?? item.date_imported
     );
 }
 
