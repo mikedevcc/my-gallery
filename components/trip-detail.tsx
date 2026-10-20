@@ -12,6 +12,7 @@ import { Icon } from './icons';
 import { TripMediaPicker } from './trip-media-picker';
 import { MoveTripMediaModal } from './move-media-modal';
 import { DeleteMediaModal } from './delete-media-modal';
+import { CollectionMenu } from './collection-menu';
 
 
 type TripRow = {
@@ -283,7 +284,75 @@ export function TripDetail({
             );
         }
 
+        setData(current => {
+            if (!current) {
+                return current;
+            }
+
+            return {
+                ...current,
+                media: current.media.map(item =>
+                    item.media_id === mediaId
+                        ? {
+                            ...item,
+                            favorite: favoriteState,
+                        }
+                        : item
+                ),
+            };
+        });
+    }
+
+    
+    async function renameCurrentTrip(
+        tripName: string
+    ) {
+        const response = await fetch(
+            `/api/trips/${trip.trip_id}`,
+            {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    tripName,
+                }),
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error(
+                'Failed to rename trip'
+            );
+        }
+
         await refreshTrip();
+    }
+
+    
+    async function deleteCurrentTrip() {
+        const confirmed = window.confirm(
+            `Delete "${trip.trip_name}"?\n\nThe photos will not be deleted.`
+        );
+
+        if (!confirmed) {
+            return;
+        }
+    
+        const response = await fetch(
+            `/api/trips/${trip.trip_id}`,
+            {
+                method: 'DELETE',
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error(
+                'Failed to delete trip'
+            );
+        }
+
+        router.push('/trips');
     }
 
 
@@ -313,6 +382,13 @@ export function TripDetail({
                     />
                     Back
                 </button>
+
+                <CollectionMenu
+                    type="trip"
+                    name={trip.trip_name}
+                    onRename={renameCurrentTrip}
+                    onDelete={deleteCurrentTrip}
+                />
 
                 <div className="trip-hero-content">
                     <div className="hero-eyebrow">
@@ -581,7 +657,7 @@ export function TripDetail({
             <MoveTripMediaModal
                 open={moveModalOpen}
                 sourceTripId={trip.trip_id}
-                mediaIds={selectedMediaIds}
+                mediaIds={validSelectedMediaIds}
                 onClose={() => {
                     setMoveModalOpen(false);
                 }}

@@ -15,6 +15,7 @@ import { Icon } from './icons';
 import { AlbumMediaPicker } from "./album-media-picker";
 import { AlbumMediaTransferModal } from './move-media-modal';
 import { DeleteMediaModal } from './delete-media-modal';
+import { CollectionMenu } from "./collection-menu";
 
 
 type AlbumRow = {
@@ -289,6 +290,58 @@ export function AlbumDetail({
         await refreshAlbum();
     }
 
+
+    async function renameCurrentAlbum(
+        albumName: string
+    ) {
+        const response = await fetch(
+            `/api/albums/${album.album_id}`,
+            {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    albumName,
+                }),
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error(
+                'Failed to rename album'
+            );
+        }
+
+        await refreshAlbum();
+    }
+
+    
+    async function deleteCurrentAlbum() {
+        const confirmed = window.confirm(
+            `Delete "${album.album_name}"?\n\nThe photos will not be deleted.`
+        );
+
+        if (!confirmed) {
+            return;
+        }
+    
+        const response = await fetch(
+            `/api/albums/${album.album_id}`,
+            {
+                method: 'DELETE',
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error(
+                'Failed to delete album'
+            );
+        }
+
+        router.push('/albums');
+    }
+
     
     return (
         <>
@@ -315,6 +368,13 @@ export function AlbumDetail({
                     />
                     Back
                 </button>
+
+                <CollectionMenu
+                    type="trip"
+                    name={album.album_name}
+                    onRename={renameCurrentAlbum}
+                    onDelete={deleteCurrentAlbum}
+                />
 
                 <div className="album-hero-content">
                     <div className="hero-eyebrow">

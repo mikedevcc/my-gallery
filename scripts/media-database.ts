@@ -1216,3 +1216,87 @@ export async function setMediaFavorite(
         client.release();
     }
 }
+
+
+export async function renameTrip(
+    tripId: number,
+    tripName: string
+): Promise<boolean> {
+    const client = await pool.connect();
+
+    try {
+        const result = await client.query(
+            `UPDATE trip
+             SET trip_name = $2
+             WHERE trip_id = $1`,
+            [tripId, tripName]
+        );
+
+        return result.rowCount === 1;
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function deleteTrip(
+    tripId: number
+): Promise<boolean> {
+    const client = await pool.connect();
+
+    try {
+        const result = await client.query(
+            `DELETE FROM trip
+             WHERE trip_id = $1`,
+            [tripId]
+        );
+
+        return result.rowCount === 1;
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function renameAlbum(
+    albumId: number,
+    albumName: string
+): Promise<boolean> {
+    const client = await pool.connect();
+
+    try {
+        const result = await client.query(
+            `UPDATE album
+             SET album_name = $1
+             WHERE album_id = $2`,
+            [albumName, albumId]
+        );
+
+        return result.rowCount === 1;
+    }
+    finally {
+        client.release();
+    }
+}
+
+
+export async function deleteAlbum(
+    albumId: number
+): Promise<boolean> {
+    const client = await pool.connect();
+
+    try {
+        const result = await client.query(
+            `DELETE FROM album
+             WHERE album_id = $1`,
+            [albumId]
+        );
+
+        return result.rowCount === 1;
+    }
+    finally {
+        client.release();
+    }
+}
