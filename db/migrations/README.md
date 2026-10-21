@@ -274,4 +274,4 @@ receipt table makes deletion roll back, retain its journal/lock and fail safely.
 Migration 0003 has not been executed as part of this implementation.
 
 See [deletion tracking](../../docs/deletion-tracking.md) for durability and the
-current manual-investigation requirement. Never edit applied 0001 or 0002.
+explicit M1-B maintenance recovery and manual-investigation cases. Never edit applied 0001 or 0002.

@@ -1,4 +1,4 @@
-import { prepareDeletionJournal, writeDeletionJournal, deletionReceiptFor, assertDeletionIdentity, syncDeletionCleanup, type DeletionReceipt } from "./deletion-tracking";
+import { prepareDeletionJournal, writeDeletionJournal, deletionReceiptFor, assertDeletionIdentity, syncDeletionCleanup, deletionThumbnailPath, type DeletionReceipt } from "./deletion-tracking";
 import fs from "node:fs/promises";
 import { publishReplacement, reconcileReplacement, type RecoveryDatabase } from "./replacement-files";
 import { prepareReplacementJournal, receiptFor, writeReplacementJournal, type ReplacementReceipt } from "./replacement-recovery";
@@ -93,6 +93,8 @@ export async function deleteMediaAtDestination(options: {
         await writeDeletionJournal(options.root, journal, lock);
         await verify();
         await deleteStoredMedia(lock.destination, lock);
+        await lock.assertOwned();
+        await assertDeletionIdentity(options.root, deletionThumbnailPath(options.root, options.mediaId), journal.thumbnail ?? null);
         await options.afterDelete();
         await syncDeletionCleanup(options.root, lock.destination);
         journal.state = "COMPLETE";

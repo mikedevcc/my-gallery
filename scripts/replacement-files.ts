@@ -37,7 +37,7 @@ async function syncDirectoryIfPresent(root: string, directory: string) {
         await (await validateStorage(root)).assertAvailable(directory);
     }
 }
-async function removeVerified(root: string, target: string, expected: FileIdentity, lock: DestinationLock) {
+export async function removeVerified(root: string, target: string, expected: FileIdentity, lock: DestinationLock) {
     await lock.assertOwned(); await lock.assertStorage(target);
     const actual = await observed(root, target);
     if (!actual) { await syncDirectoryIfPresent(root, path.dirname(target)); return; }

@@ -1,3 +1,4 @@
+import type { DeletionEvidence } from "./deletion-recovery";
 import type { DeletionReceipt } from "./deletion-tracking";
 import type { ReplacementEvidence } from "./replacement-files";
 import type { ReplacementReceipt } from "./replacement-recovery";
@@ -1368,6 +1369,30 @@ export async function withReplacementRecoveryDatabase<T>(operationId: string, me
     } catch (error) {
         try { await client.query("ROLLBACK"); }
         catch (rollbackError) { throw new AggregateError([error, rollbackError], "Recovery transaction close failed"); }
+        throw error;
+    } finally { client.release(); }
+}
+
+// Receipt absence is conclusive only after acquiring the original operation lock.
+export async function withDeletionRecoveryDatabase<T>(operationId: string, mediaId: number, target: string,
+    action: (evidence: DeletionEvidence) => Promise<T>): Promise<T> {
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN ISOLATION LEVEL READ COMMITTED READ ONLY");
+        const primary = await client.query("SELECT pg_is_in_recovery() AS standby");
+        if (primary.rows[0]?.standby !== false) throw new Error("Deletion recovery requires the verified primary database");
+        await lockReplacementTransaction(client, operationId);
+        const receipt = await client.query<DeletionReceipt>(
+            `SELECT operation_id::text AS "operationId", media_id AS "mediaId", target_path AS target,
+                    original_identity AS original FROM public.media_deletion_receipts WHERE operation_id=$1`, [operationId]);
+        const media = await client.query<{ media_id: number; path: string }>(
+            "SELECT media_id, path FROM public.media WHERE media_id=$1 OR path=$2", [mediaId, target]);
+        const result = await action({ receipt: receipt.rows[0], media: media.rows });
+        await client.query("COMMIT");
+        return result;
+    } catch (error) {
+        try { await client.query("ROLLBACK"); }
+        catch (rollbackError) { throw new AggregateError([error, rollbackError], "Deletion recovery transaction close failed"); }
         throw error;
     } finally { client.release(); }
 }

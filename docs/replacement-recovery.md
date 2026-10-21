@@ -135,8 +135,9 @@ fsync behavior, PostgreSQL durable WAL/fsync configuration and working hardware
 flushes. Physical disconnects between validation and syscalls, broken hardware,
 nonparticipating writers and manual SQL are outside the protocol. Journals and
 receipts are retained indefinitely; access/retention policies need separate review.
-Import/deletion crash recovery is not added by H4-C. Existing destination locking
-still excludes them while replacement/recovery is unresolved.
+Import crash recovery is not added by H4-C. Deletion recovery is documented in
+[deletion tracking](deletion-tracking.md). Destination locking excludes competing
+operations while replacement or deletion recovery is unresolved.
 
 Offline checks use temporary media and mocked mount/SQL probes:
 

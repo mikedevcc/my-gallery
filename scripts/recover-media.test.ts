@@ -10,6 +10,8 @@ test("recovery CLI rejects unconfirmed/unexpected targets before connecting", ()
         { args: base, url: "postgresql://user:secret@127.0.0.1:55439/h4c_replacement_test_fixture", installation: "wrong", error: "installation confirmation" },
         { args: base, url: "postgresql://user:secret@127.0.0.1:55439/mygallery", installation: id, error: "Unexpected recovery database target" },
         { args: base, url: "postgresql://user:secret@127.0.0.1:55439/postgres", installation: id, error: "Unexpected recovery database target" },
+        { args: [...base, "--kind", "unknown"], url: "postgresql://user:secret@127.0.0.1:55439/h4c_replacement_test_fixture", installation: id, error: "Recovery kind" },
+        { args: [...base, "--kind", "deletion"], url: "postgresql://user:secret@127.0.0.1:55439/mygallery", installation: id, error: "Unexpected recovery database target" },
     ]) {
         const env: NodeJS.ProcessEnv = { ...process.env, MEDIA_RECOVERY_DATABASE_URL: item.url, MEDIA_STORAGE_ID: item.installation };
         delete env.NODE_TEST_CONTEXT;

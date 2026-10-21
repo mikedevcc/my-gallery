@@ -55,6 +55,7 @@ async function withPool<T>(options: Options, operation: (state: {
                 if (queries.length === options.failQuery) throw error;
                 const response = options.response?.(sql);
                 if (response) return response;
+                if (sql.includes("pg_is_in_recovery")) return { rows: [{ standby: false }], rowCount: 1 };
                 if (sql.includes("pg_try_advisory_xact_lock")) return { rows: [{ locked: true }], rowCount: 1 };
                 if (sql.includes("FROM public.media_replacement_receipts")) return { rows: [], rowCount: 0 };
                 if (sql.startsWith("SELECT media_id FROM media WHERE path")) return { rows: [], rowCount: 0 };
@@ -72,6 +73,7 @@ async function withPool<T>(options: Options, operation: (state: {
 }
 
 const operations: Record<Exclude<keyof typeof database, "closeMediaDatabase">, () => Promise<unknown>> = {
+    withDeletionRecoveryDatabase: () => database.withDeletionRecoveryDatabase(deletionReceipt.operationId, 1, deletionReceipt.target, async () => {}),
     withReplacementRecoveryDatabase: () => database.withReplacementRecoveryDatabase("12345678-1234-4234-8234-123456789abc", 1, async value => value),
     getReplacementReceipt: () => database.getReplacementReceipt("12345678-1234-4234-8234-123456789abc"),
     findMediaByPath: () => database.findMediaByPath("/test/test.jpg"),
@@ -256,5 +258,41 @@ test("changed deletion path rolls back without writing a receipt", async () => {
         await assert.rejects(database.deleteMediaById(1, async () => {}, deletionReceipt), /metadata changed/);
         assert.equal(queries.at(-1), "ROLLBACK");
         assert.ok(!queries.some(sql => sql.startsWith("INSERT")));
+    });
+});
+
+
+test("deletion recovery takes advisory lock before fresh receipt and path-reuse reads", async () => {
+    await withPool({ response: sql => {
+        if (sql.includes("FROM public.media_deletion_receipts")) return { rows: [deletionReceipt], rowCount: 1 };
+        if (sql.startsWith("SELECT media_id, path FROM public.media")) return { rows: [], rowCount: 0 };
+    } }, async ({ queries, parameters }) => {
+        await database.withDeletionRecoveryDatabase(deletionReceipt.operationId, 1, deletionReceipt.target, async evidence => {
+            assert.deepEqual(evidence, { receipt: deletionReceipt, media: [] });
+            assert.equal(queries[0], "BEGIN ISOLATION LEVEL READ COMMITTED READ ONLY");
+            assert.match(queries[1], /pg_is_in_recovery/);
+            assert.match(queries[2], /pg_try_advisory_xact_lock/);
+            assert.match(queries[3], /media_deletion_receipts/);
+            assert.match(queries[4], /media_id=\$1 OR path=\$2/);
+            assert.deepEqual(parameters[4], [1, deletionReceipt.target]);
+        });
+        assert.equal(queries.at(-1), "COMMIT");
+    });
+});
+
+test("busy deletion advisory lock cannot be mistaken for absent receipt", async () => {
+    await withPool({ response: sql => sql.includes("pg_try_advisory_xact_lock") ? { rows: [{ locked: false }], rowCount: 1 } : undefined }, async ({ queries }) => {
+        await assert.rejects(database.withDeletionRecoveryDatabase(deletionReceipt.operationId, 1, deletionReceipt.target, async () => { assert.fail("No evidence before settled DB operation"); }), /still running/);
+        assert.equal(queries.at(-1), "ROLLBACK");
+        assert.ok(!queries.some(sql => sql.includes("media_deletion_receipts")));
+    });
+});
+
+
+test("deletion recovery refuses receipt absence on a standby", async () => {
+    await withPool({ response: sql => sql.includes("pg_is_in_recovery") ? { rows: [{ standby: true }], rowCount: 1 } : undefined }, async ({ queries }) => {
+        await assert.rejects(database.withDeletionRecoveryDatabase(deletionReceipt.operationId, 1, deletionReceipt.target, async () => { assert.fail("Standby cannot decide outcome"); }), /verified primary/);
+        assert.ok(!queries.some(sql => sql.includes("media_deletion_receipts")));
+        assert.equal(queries.at(-1), "ROLLBACK");
     });
 });

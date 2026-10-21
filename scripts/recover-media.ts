@@ -1,5 +1,6 @@
 import { Client } from "pg";
 import { getMediaStorageRoot } from "./storage-safety";
+import { recoverDeletion } from "./deletion-recovery";
 import { recoverReplacement } from "./replacement-files";
 
 // Explicit maintenance command. Never runs from Next.js startup or request paths.
@@ -7,10 +8,12 @@ async function main() {
     const [operationId, ...args] = process.argv.slice(2);
     const flags = new Map<string, string>();
     for (let i = 0; i < args.length; i += 2) {
-        if (!["--host", "--port", "--database", "--confirm-installation"].includes(args[i]) || !args[i + 1] || flags.has(args[i])) throw new Error("Invalid recovery options");
+        if (!["--host", "--port", "--database", "--confirm-installation", "--kind"].includes(args[i]) || !args[i + 1] || flags.has(args[i])) throw new Error("Invalid recovery options");
         flags.set(args[i], args[i + 1]);
     }
-    if (!operationId || !/^[0-9a-f-]{36}$/i.test(operationId) || !process.env.MEDIA_RECOVERY_DATABASE_URL) throw new Error("Usage: recover-media.ts OPERATION_UUID --host HOST --port PORT --database NAME --confirm-installation STORAGE_ID; set MEDIA_RECOVERY_DATABASE_URL and storage configuration explicitly");
+    const kind = flags.get("--kind") ?? "replacement";
+    if (!["replacement", "deletion"].includes(kind)) throw new Error("Recovery kind must be replacement or deletion");
+    if (!operationId || !/^[0-9a-f-]{36}$/i.test(operationId) || !process.env.MEDIA_RECOVERY_DATABASE_URL) throw new Error("Usage: recover-media.ts OPERATION_UUID --host HOST --port PORT --database NAME --confirm-installation STORAGE_ID; [--kind replacement|deletion]; set MEDIA_RECOVERY_DATABASE_URL and storage configuration explicitly");
     if (!process.env.MEDIA_STORAGE_ID || flags.get("--confirm-installation") !== process.env.MEDIA_STORAGE_ID) throw new Error("Explicit installation confirmation required");
     const url = new URL(process.env.MEDIA_RECOVERY_DATABASE_URL);
     if (!["postgres:", "postgresql:"].includes(url.protocol) || !url.username || !url.hostname || !url.port || url.hash || [...url.searchParams.keys()].some(key => key !== "sslmode")) throw new Error("Explicit PostgreSQL target required");
@@ -24,8 +27,10 @@ async function main() {
         if (row.name !== database || row.port !== Number(url.port) || row.role !== decodeURIComponent(url.username) || Math.floor(row.version / 10000) !== 17) throw new Error("Recovery connection identity mismatch");
     } finally { await probe.end(); }
     process.env.DATABASE_URL = url.href; // Set before loading the application's pool; never load .env.
-    const { withReplacementRecoveryDatabase, closeMediaDatabase } = await import("./media-database");
-    try { console.log(await recoverReplacement(getMediaStorageRoot(), operationId, withReplacementRecoveryDatabase)); }
+    const { withReplacementRecoveryDatabase, withDeletionRecoveryDatabase, closeMediaDatabase } = await import("./media-database");
+    try { console.log(kind === "deletion"
+        ? await recoverDeletion(getMediaStorageRoot(), operationId, withDeletionRecoveryDatabase)
+        : await recoverReplacement(getMediaStorageRoot(), operationId, withReplacementRecoveryDatabase)); }
     finally { await closeMediaDatabase(); }
 }
 main().catch(error => { console.error(error instanceof Error ? error.message : "Recovery failed"); process.exitCode = 1; });
