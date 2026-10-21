@@ -227,14 +227,15 @@ export async function insertImportedMedia(
         longitude,
     } = imported.media;
 
-    const client = await pool.connect();
-
     // Check for existing media at path
     const existingMedia = await findMediaByPath(absolutePath);
         
     if (existingMedia !== undefined) {
         throw new Error(`Media already exists with media_id: ${existingMedia.media_id} \nfor path ${absolutePath}`);
     }
+
+    // The lookup releases its own client before we acquire the transaction client.
+    const client = await pool.connect();
 
     try {
         await client.query("BEGIN");
