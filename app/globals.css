@@ -1282,27 +1282,30 @@ textarea:focus-visible {
     place-items: center;
 
     border: 0;
-    background: transparent;
+    background: none;
     color: white;
+
     cursor: pointer;
 
     opacity: 0;
-    transition: opacity .2s;
+    transition: 
+        opacity .2s,
+        background .2s;
 }
 
 .photo-favorite svg {
-    stroke: #24322d;
-    stroke-width: 1.8;
-    paint-order: stroke fill;
+    fill: 0008;
+    stroke: white;
+    stroke-width: 2;
 }
 
 .photo-favorite.is-favorite svg {
     fill: white;
-    stroke: #24322d;
+    stroke: #0008;
 }
 
 .photo-favorite:not(.is-favorite) svg {
-    fill: none;
+    fill: #0002;
 }
 
 .album-media-tile:hover .photo-favorite,
@@ -1311,14 +1314,6 @@ textarea:focus-visible {
 .photo-favorite:focus-visible,
 .photo-favorite.is-favorite {
     opacity: 1;
-}
-
-.photo-favorite.is-favorite svg {
-    fill: currentColor;
-}
-
-.photo-favorite:not(.is-favorite) svg {
-    fill: none;
 }
 
 .collection-menu {
@@ -1581,6 +1576,16 @@ textarea:focus-visible {
 .photo-library-tile .photo-tile {
     width: 100%;
     height: 100%;
+}
+
+.photo-overlay {
+    opacity: 0;
+    transition: opacity .2s;
+}
+
+.photo-library-tile:hover .photo-overlay,
+.photo-library-tile .photo-tile:focus-visible .photo-overlay {
+    opacity: 1;
 }
 
 
