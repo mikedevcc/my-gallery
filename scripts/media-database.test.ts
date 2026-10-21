@@ -78,7 +78,7 @@ const operations: Record<keyof typeof database, () => Promise<unknown>> = {
     getMediaDetailsById: () => database.getMediaDetailsById(1),
     getAvailableMedia: () => database.getAvailableMedia(),
     moveMediaToTrip: () => database.moveMediaToTrip([1], 1, 2),
-    deleteMediaById: () => database.deleteMediaById(1),
+    deleteMediaById: () => database.deleteMediaById(1, async () => {}),
     getLibraryMedia: () => database.getLibraryMedia(),
     getAlbums: () => database.getAlbums(),
     createAlbum: () => database.createAlbum("album"),

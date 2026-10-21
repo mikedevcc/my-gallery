@@ -825,11 +825,14 @@ export async function moveMediaToTrip(
 
 
 export async function deleteMediaById(
-    mediaId: number
+    mediaId: number,
+    verifyStorage: () => Promise<void>,
 ): Promise<DeletedMediaRow | undefined> {
     const client = await pool.connect();
 
     try {
+        await client.query("BEGIN");
+        await verifyStorage();
         const result = await client.query<DeletedMediaRow>(
                 `DELETE FROM media
                  WHERE media_id = $1
@@ -839,7 +842,13 @@ export async function deleteMediaById(
                 [mediaId]
             );
 
+        await verifyStorage();
+        await client.query("COMMIT");
         return result.rows[0];
+    }
+    catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
     }
     finally {
         client.release();

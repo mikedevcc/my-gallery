@@ -17,6 +17,7 @@ export async function replaceMediaAtDestination(options: {
         await fs.access(lock.destination);
         const state = await beginMediaReplacement(options.stagedPath, lock.destination, lock);
         try {
+            await lock.assertOwned();
             await options.updateMetadata();
         } catch (error) {
             // Preserve existing best-effort rollback, but do not claim PostgreSQL
@@ -35,14 +36,15 @@ export async function deleteMediaAtDestination(options: {
     root: string;
     destination: string;
     revalidateMetadata: () => Promise<boolean>;
-    deleteMetadata: () => Promise<boolean>;
+    deleteMetadata: (assertStorage: () => Promise<void>) => Promise<boolean>;
     afterDelete: () => Promise<void>;
 }): Promise<boolean> {
     return withDestinationLock(options.root, options.destination, async lock => {
         if (!await options.revalidateMetadata()) return false;
         await lock.revalidate();
         lock.markUnresolved();
-        if (!await options.deleteMetadata()) {
+        await lock.assertOwned();
+        if (!await options.deleteMetadata(() => lock.assertOwned())) {
             lock.markSafe();
             return false;
         }

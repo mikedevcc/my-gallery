@@ -10,14 +10,17 @@ import { fileURLToPath } from "node:url";
 import { acquireDestinationLock, DestinationBusyError, DestinationRecoveryError, withDestinationLock } from "./destination-lock";
 import { deleteMediaAtDestination, replaceMediaAtDestination } from "./media-mutations";
 import { finalizeStagedMedia, removeStagedConflict } from "./media-storage";
+import { mockStorageMount, writeTestStorageMarker } from "./testing/storage-fixture";
 
 async function fixture(run: (root: string, destination: string) => Promise<void>) {
     const root = await fs.mkdtemp(path.join(tmpdir(), "gallery-destination-lock-"));
+    await writeTestStorageMarker(root);
+    const mount = await mockStorageMount(root);
     try {
         const destination = path.join(root, "original.jpg");
         await fs.writeFile(destination, "original");
         await run(root, destination);
-    } finally { await fs.rm(root, { recursive: true, force: true }); }
+    } finally { mount.restore(); await fs.rm(root, { recursive: true, force: true }); }
 }
 
 function gate() {
@@ -220,8 +223,10 @@ test("SKIP cannot discard staging while its destination is locked", () => fixtur
 test("another Node process excludes parent acquisition; process death never evicts its lock", { timeout: 15000 }, () => fixture(async (root, destination) => {
     const modulePath = fileURLToPath(new URL("./destination-lock.ts", import.meta.url));
     const loader = fileURLToPath(new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url));
+    const fixturePath = fileURLToPath(new URL("./testing/storage-fixture.ts", import.meta.url));
     const worker = `const {acquireDestinationLock}=require(${JSON.stringify(modulePath)});
-        acquireDestinationLock(process.argv[1],process.argv[2]).then(lock=>{
+        const {mockStorageMount}=require(${JSON.stringify(fixturePath)});
+        mockStorageMount(process.argv[1]).then(()=>acquireDestinationLock(process.argv[1],process.argv[2])).then(lock=>{
             console.log('READY'); process.stdin.resume();
             process.stdin.on('data',async()=>{await lock.release(); console.log('RELEASED'); process.stdin.pause();});
         }).catch(e=>{console.error(e);process.exitCode=1});`;

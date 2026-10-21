@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { validateStorage } from "./storage-safety";
 
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -99,7 +100,10 @@ async function runExifTool(
     filePath: string,
     args: string[]
 ): Promise<ExifData> {
+    const storage = await validateStorage();
+    await storage.assertAvailable(filePath);
     const { stdout } = await execFileAsync("exiftool", [...args, filePath]);
+    await storage.assertAvailable(filePath);
 
     const parsed: unknown = JSON.parse(stdout);
 
@@ -188,7 +192,10 @@ async function inspectMediaFile(
     // get extension
     const extension = path.extname(absolutePath).toLowerCase();
     
+    const storage = await validateStorage();
+    await storage.assertAvailable(absolutePath);
     const stats = await fs.stat(absolutePath);
+    await storage.assertAvailable(absolutePath);
 
     // validate existence
     if (!stats.isFile()) {

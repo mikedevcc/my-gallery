@@ -1,3 +1,4 @@
+import { validateStorage } from "./storage-safety";
 import { savePendingConflict } from "./pending-import-conflicts";
 import { DestinationBusyError, DestinationRecoveryError } from "./destination-lock";
 import { replaceMediaAtDestination } from "./media-mutations";
@@ -17,7 +18,7 @@ import {
     buildDestinationPath, 
     stageMediaFile, 
     finalizeStagedMedia,
-    storageRoot,
+    getMediaStorageRoot,
     destinationExists,
     findStagedConflictFile,
     removeStagedConflict,
@@ -54,6 +55,8 @@ type ConflictResolutionResult =
 
 
 async function cleanupStagedJob(stagedPath: string): Promise<void> {
+    const storage = await validateStorage();
+    await storage.assertAvailable(stagedPath);
     try {
         await fs.rm(path.dirname(stagedPath), {
             recursive: true,
@@ -253,7 +256,7 @@ async function applyStagedConflictResolution(
         };
 
         await replaceMediaAtDestination({
-            root: storageRoot,
+            root: getMediaStorageRoot(),
             destination,
             stagedPath,
             revalidateMetadata: async () => {
@@ -281,6 +284,8 @@ export async function resolveStagedConflict(
 ): Promise<ConflictResolutionResult> {
     const stagedPath = await findStagedConflictFile(conflictId);
     const lockPath = path.join(path.dirname(stagedPath), ".resolution-lock");
+    const storage = await validateStorage();
+    await storage.assertAvailable(lockPath);
     try {
         await fs.mkdir(lockPath);
     } catch (error) {
@@ -292,6 +297,7 @@ export async function resolveStagedConflict(
     try {
         return await applyStagedConflictResolution(conflictId, action);
     } finally {
+        await storage.assertAvailable(lockPath);
         await fs.rm(lockPath, { recursive: true, force: true });
     }
 }

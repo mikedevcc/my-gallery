@@ -1,4 +1,4 @@
-import fs from "node:fs/promises";
+import { readStorageFile } from "@/scripts/storage-safety";
 import path from "node:path";
 
 import {
@@ -78,7 +78,7 @@ export async function GET(
     }
 
     try {
-        const file = await fs.readFile(media.path);
+        const file = await readStorageFile(media.path);
 
         return new Response(file, {
             headers: {

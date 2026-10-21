@@ -1,6 +1,6 @@
 import { getMediaDetailsById, setMediaFavorite } from "@/scripts/media-database";
 import { deleteMediaById, getMediaFileById } from "@/scripts/media-database";
-import { storageRoot } from "@/scripts/media-storage";
+import { getMediaStorageRoot } from "@/scripts/media-storage";
 import { deleteMediaAtDestination } from "@/scripts/media-mutations";
 import { deleteThumbnail } from "@/scripts/media-thumbnail";
 
@@ -67,7 +67,7 @@ export async function DELETE(
     const media = await getMediaFileById(parsedMediaId);
 
     const deleted = media && await deleteMediaAtDestination({
-        root: storageRoot,
+        root: getMediaStorageRoot(),
         destination: media.path,
         revalidateMetadata: async () => {
             const current = await getMediaFileById(parsedMediaId);
@@ -75,8 +75,8 @@ export async function DELETE(
             if (current.path !== media.path) throw new Error("Media path changed; retry deletion");
             return true;
         },
-        deleteMetadata: async () => {
-            const row = await deleteMediaById(parsedMediaId);
+        deleteMetadata: async verifyStorage => {
+            const row = await deleteMediaById(parsedMediaId, verifyStorage);
             if (row && row.path !== media.path) throw new Error("Deleted media path changed; manual recovery required");
             return row !== undefined;
         },

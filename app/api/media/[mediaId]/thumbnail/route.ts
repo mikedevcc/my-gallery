@@ -1,4 +1,4 @@
-import fs from "node:fs/promises";
+import { readStorageFile } from "@/scripts/storage-safety";
 
 import { getMediaFileById } from "@/scripts/media-database";
 import { getOrCreateThumbnail } from "@/scripts/media-thumbnail";
@@ -45,7 +45,7 @@ export async function GET(
             );
 
         const thumbnail =
-            await fs.readFile(thumbnailPath);
+            await readStorageFile(thumbnailPath);
 
         return new Response(thumbnail, {
             headers: {

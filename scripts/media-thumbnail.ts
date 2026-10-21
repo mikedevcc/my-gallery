@@ -1,13 +1,14 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import sharp from "sharp";
+import { createStorageDirectory, validateStorage } from "./storage-safety";
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import {
     destinationExists,
-    storageRoot
+    getMediaStorageRoot
 } from "./media-storage";
 
 
@@ -19,17 +20,24 @@ export async function getOrCreateThumbnail(
     mediaPath: string,
     fileType: "IMAGE" | "VIDEO"
 ): Promise<string> {
-    const thumbnailDirectory = path.join(storageRoot, ".thumbnails");
+    const storage = await validateStorage();
+    await storage.assertAvailable(mediaPath);
+    const thumbnailDirectory = path.join(storage.root, ".thumbnails");
+    await storage.assertAvailable(thumbnailDirectory);
     const thumbnailName = `${mediaId}.webp`;
 
-    await fs.mkdir(thumbnailDirectory, { recursive: true });
+    await createStorageDirectory(storage, thumbnailDirectory);
     
     const thumbnailPath = path.join(thumbnailDirectory, thumbnailName);
 
+    await storage.assertAvailable(thumbnailPath);
     if (await destinationExists(thumbnailPath)) {
+        await storage.assertAvailable(thumbnailPath);
         return thumbnailPath;
     }
 
+    await storage.assertAvailable(mediaPath);
+    await storage.assertAvailable(thumbnailPath);
     if (fileType === "IMAGE") {
         await sharp(mediaPath)
             .resize({
@@ -56,6 +64,7 @@ export async function getOrCreateThumbnail(
 
     }
 
+    await storage.assertAvailable(thumbnailPath);
     return thumbnailPath
 }
 
@@ -64,11 +73,13 @@ export async function deleteThumbnail(
     mediaId: number
 ): Promise<void> {
     const thumbnailPath = path.join(
-        storageRoot,
+        getMediaStorageRoot(),
         '.thumbnails',
         `${mediaId}.webp`
     );
 
+    const storage = await validateStorage();
+    await storage.assertAvailable(thumbnailPath);
     try {
         await fs.unlink(thumbnailPath);
     }
@@ -78,6 +89,7 @@ export async function deleteThumbnail(
             'code' in error &&
             error.code === 'ENOENT'
         ) {
+            await storage.assertAvailable(thumbnailPath);
             return;
         }
 

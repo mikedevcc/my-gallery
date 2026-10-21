@@ -1,5 +1,8 @@
 # My Gallery - Server Prerequisites
 
+For required HDD configuration, mount identity, marker provisioning, permissions,
+and service dependencies, see [Media storage on Debian](storage-configuration.md).
+
 ## Operating System
 - Debian
 

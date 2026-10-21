@@ -1,5 +1,10 @@
 # Destination locks (H4-A)
 
+Storage must first satisfy the required configuration, UUID/mount and installation
+marker checks in [storage configuration](storage-configuration.md). All active
+locks revalidate that storage identity; a missing or changed mount is not an empty
+destination. No root directory or marker is automatically provisioned.
+
 Original-media writers coordinate through `<storageRoot>/.destination-locks/`.
 An atomic mkdir claims a SHA-256 key derived from the root-relative canonical
 parent path plus destination filename. Parent symlink aliases resolve to the same key; destination

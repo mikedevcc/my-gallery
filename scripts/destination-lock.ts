@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { createStorageDirectory, validateStorage } from "./storage-safety";
 
 export class DestinationBusyError extends Error {}
 export class DestinationRecoveryError extends Error {}
@@ -45,22 +46,26 @@ export type DestinationLock = {
     markUnresolved(): void;
     markSafe(): void;
     assertOwned(destination?: string): Promise<void>;
+    assertStorage(target?: string): Promise<void>;
     revalidate(): Promise<void>;
     release(): Promise<void>;
 };
 
 export async function acquireDestinationLock(storageRoot: string, destination: string): Promise<DestinationLock> {
-    const root = await fs.realpath(storageRoot);
+    const storage = await validateStorage(storageRoot);
+    const root = storage.root;
     const canonical = await canonicalDestination(root, destination);
     // Reject unsupported targets before leaving any lock artifacts. Capture the
     // authoritative fingerprint again after exclusive acquisition below.
     await fingerprint(canonical);
     const locks = path.join(root, ".destination-locks");
-    await fs.mkdir(locks, { recursive: true });
+    await storage.assertAvailable(locks);
+    await createStorageDirectory(storage, locks);
     if (await fs.realpath(locks) !== locks) throw new Error("Lock directory must not be a symlink");
     // Root-relative canonical identity also works when the same shared storage
     // root is mounted at different absolute paths by separate processes.
     const directory = path.join(locks, createHash("sha256").update(path.relative(root, canonical)).digest("hex"));
+    await storage.assertAvailable(directory);
     try { await fs.mkdir(directory); }
     catch (error) {
         if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new DestinationBusyError("Media destination is locked; retry after completion or request recovery review");
@@ -71,6 +76,7 @@ export async function acquireDestinationLock(storageRoot: string, destination: s
     const token = randomUUID();
     const ownerPath = path.join(directory, "owner.json");
     const identity = await fs.lstat(directory, { bigint: true });
+    await storage.assertAvailable(ownerPath);
     await fs.writeFile(ownerPath, JSON.stringify({ token, destination: canonical, pid: process.pid }), { flag: "wx" });
     let released = false;
     const initial = await fingerprint(canonical);
@@ -80,7 +86,10 @@ export async function acquireDestinationLock(storageRoot: string, destination: s
         unresolved: false,
         markUnresolved() { this.unresolved = true; },
         markSafe() { this.unresolved = false; },
+        assertStorage: target => storage.assertAvailable(target),
         async assertOwned(target = canonical) {
+            await storage.assertAvailable(target);
+            await storage.assertAvailable(ownerPath);
             if (released) throw new Error("Destination lock has already been released");
             const current = await fs.lstat(directory, { bigint: true });
             const owner = JSON.parse(await fs.readFile(ownerPath, "utf8")) as { token?: string };
@@ -96,6 +105,7 @@ export async function acquireDestinationLock(storageRoot: string, destination: s
             if (this.unresolved) throw new DestinationRecoveryError("Unresolved destination lock must be retained for manual recovery");
             await this.assertOwned();
             await fs.unlink(ownerPath);
+            await storage.assertAvailable(directory);
             await fs.rmdir(directory);
             released = true;
         },

@@ -1,5 +1,9 @@
 # My Gallery
 
+Before using media storage, follow [Debian storage provisioning and validation](docs/storage-configuration.md).
+`MEDIA_STORAGE_ROOT`, `MEDIA_STORAGE_UUID`, and `MEDIA_STORAGE_ID` are required;
+the application does not create the storage root or installation marker.
+
 A responsive, frontend-only personal photo library prototype built with Next.js App Router, React, TypeScript, and Tailwind CSS.
 
 ## Run
