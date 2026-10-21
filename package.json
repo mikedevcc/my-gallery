@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:migrate": "node --import tsx scripts/migrations/run.ts",
+    "db:migrate:test": "node --import tsx --test scripts/migrations/core.test.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
