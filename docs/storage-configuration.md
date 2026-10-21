@@ -150,3 +150,6 @@ Fixtures explicitly create their own markers under fresh temporary directories
 and mock mount/device metadata. There is no production test-mode bypass. These
 tests do not mount, format, or inspect a real HDD or connect to PostgreSQL. Verify
 the actual deployment separately before enabling media writes.
+
+For upload/destination component rules, private namespaces, symlink handling and
+legacy-path compatibility, see [media path security](media-path-security.md).

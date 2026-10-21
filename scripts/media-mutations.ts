@@ -1,3 +1,4 @@
+import { assertMediaInputPath } from "./media-paths";
 import type { ResolutionClaim } from "./conflict-resolution-lock";
 import { prepareDeletionJournal, writeDeletionJournal, deletionReceiptFor, assertDeletionIdentity, syncDeletionCleanup, deletionThumbnailPath, type DeletionReceipt } from "./deletion-tracking";
 import fs from "node:fs/promises";
@@ -18,6 +19,7 @@ export async function replaceMediaAtDestination(options: {
     revalidateMetadata: () => Promise<void>;
     updateMetadata: (receipt: ReplacementReceipt, assertStorage: () => Promise<void>) => Promise<void>;
 }): Promise<void> {
+    assertMediaInputPath(options.root, options.stagedPath);
     await withDestinationLock(options.root, options.destination, async lock => {
         await options.revalidateMetadata();
         await lock.revalidate();

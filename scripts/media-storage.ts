@@ -1,3 +1,4 @@
+import { assertMediaSegment, assertOriginalMediaPath, assertStagedMediaPath, assertMediaInputPath, canonicalOriginalDestination } from "./media-paths";
 import { acquireResolutionClaim, finishOwnedConflict, type ResolutionClaim } from "./conflict-resolution-lock";
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -20,7 +21,9 @@ export async function removeEmptyParentDirectories(
 ): Promise<void> {
     const storage = await validateStorage();
     const root = storage.root;
-    let directoryPath = path.dirname(path.resolve(filePath));
+    assertOriginalMediaPath(root, filePath);
+    await storage.assertAvailable(filePath);
+    let directoryPath = path.dirname(await canonicalOriginalDestination(root, filePath));
 
     while (directoryPath !== root) {
         // Safety: never allow cleanup outside storageRoot
@@ -67,12 +70,16 @@ export function buildDestinationPath(
         ?? "Unknown";
 
     const location = city ?? "Unknown";
+    const fileName = imported.file.fileName;
 
+    assertMediaSegment(String(year), true);
+    assertMediaSegment(location, true);
+    assertMediaSegment(fileName);
     return path.join(
         getMediaStorageRoot(),
         String(year), 
         location, 
-        imported.file.fileName
+        fileName
     );
 }
 
@@ -80,6 +87,8 @@ export function buildDestinationPath(
 export async function stageMediaFile(
     file: File
 ): Promise<string> {
+    const fileName = file.name;
+    assertMediaSegment(fileName);
     const storage = await validateStorage();
     const incomingPath = path.join(storage.root, ".incoming");
 
@@ -89,7 +98,7 @@ export async function stageMediaFile(
     await storage.assertAvailable(jobPath);
     await createStorageDirectory(storage, jobPath);
 
-    const stagedPath = path.join(jobPath, file.name);
+    const stagedPath = path.join(jobPath, fileName);
 
     // Copy source file into .incoming
     try {
@@ -131,6 +140,8 @@ export async function finalizeStagedMedia(
     onFinalized?: (finalPath: string) => Promise<void>,
     root = getMediaStorageRoot(),
 ): Promise<string> {
+    assertOriginalMediaPath(root, destinationPath);
+    assertMediaInputPath(root, stagedPath);
     const { name, ext, dir } = path.parse(destinationPath);
     for (let count = 0; ; count++) {
         const candidate = path.join(dir, count === 0 ? `${name}${ext}` : `${name} (${count})${ext}`);
@@ -163,9 +174,11 @@ export async function destinationExists(
     destinationPath: string
 ): Promise<boolean> {
     const storage = await validateStorage();
-    await storage.assertAvailable(destinationPath);
+    const canonical = await canonicalOriginalDestination(storage.root, destinationPath);
+    await storage.assertAvailable(canonical);
     try {
-        await fs.access(destinationPath);
+        await fs.access(canonical);
+        await storage.assertAvailable(canonical);
         return true;
     }
     catch (error) {
@@ -270,11 +283,11 @@ export async function findStagedConflictFile(
         );
     }
 
-    // return its absolute path
-    return path.join(
-        conflictDirectory,
-        files[0].name
-    );
+    // Validate the selected filename before returning any staged input.
+    const stagedPath = path.join(conflictDirectory, files[0].name);
+    assertStagedMediaPath(storage.root, stagedPath, conflictId);
+    await storage.assertAvailable(stagedPath);
+    return stagedPath;
 }
 
 

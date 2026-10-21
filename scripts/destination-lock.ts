@@ -1,3 +1,4 @@
+import { canonicalOriginalDestination as canonicalDestination } from "./media-paths";
 import fs from "node:fs/promises";
 import { processIdentity, processHasStopped } from "./process-identity";
 import path from "node:path";
@@ -7,27 +8,6 @@ import { createStorageDirectory, validateStorage } from "./storage-safety";
 export class DestinationBusyError extends Error {}
 export class DestinationRecoveryError extends Error {}
 
-async function canonicalDestination(root: string, destination: string): Promise<string> {
-    const absolute = path.resolve(destination);
-    let parent = path.dirname(absolute);
-    const missing: string[] = [];
-    while (true) {
-        try { parent = await fs.realpath(parent); break; }
-        catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-            missing.unshift(path.basename(parent));
-            const next = path.dirname(parent);
-            if (next === parent) throw error;
-            parent = next;
-        }
-    }
-    const canonical = path.join(parent, ...missing, path.basename(absolute));
-    const relative = path.relative(root, canonical);
-    if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative) || relative.split(path.sep)[0] === ".destination-locks") {
-        throw new Error("Destination must be an original media path inside the storage root");
-    }
-    return canonical;
-}
 
 async function fingerprint(destination: string): Promise<string | undefined> {
     try {
@@ -61,6 +41,7 @@ export async function acquireDestinationLock(storageRoot: string, destination: s
     // Reject unsupported targets before leaving any lock artifacts. Capture the
     // authoritative fingerprint again after exclusive acquisition below.
     await fingerprint(canonical);
+    await storage.assertAvailable(canonical);
     const locks = path.join(root, ".destination-locks");
     await storage.assertAvailable(locks);
     await createStorageDirectory(storage, locks);

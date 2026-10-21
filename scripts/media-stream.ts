@@ -1,3 +1,4 @@
+import { assertOriginalMediaPath, assertStagedMediaPath, InvalidMediaPathError } from "./media-paths";
 import fs, { type FileHandle } from "node:fs/promises";
 import { constants } from "node:fs";
 import type { BigIntStats } from "node:fs";
@@ -37,6 +38,8 @@ function relativePath(root: string, target: string): string[] {
     return relative.split(path.sep);
 }
 function originalPath(root: string, target: string) {
+    try { assertOriginalMediaPath(root, target); }
+    catch { throw new MediaDeliveryError(404, "Media unavailable"); }
     const parts = relativePath(root, target);
     const name = parts.at(-1)!;
     if (parts.slice(0, -1).some(part => part.startsWith(".")) || (name.startsWith(".") && !mediaContentType(name)) || recoveryName.test(name)) throw new MediaDeliveryError(404, "Media unavailable");
@@ -44,6 +47,8 @@ function originalPath(root: string, target: string) {
 function selectionPaths(root: string, selection: MediaStreamSelection) {
     originalPath(root, selection.destination);
     if (selection.incomingConflictId !== undefined) {
+        try { assertStagedMediaPath(root, selection.filePath, selection.incomingConflictId); }
+        catch { throw new MediaDeliveryError(404, "Preview unavailable"); }
         const parts = relativePath(root, selection.filePath);
         if (!uuid.test(selection.incomingConflictId) || parts.length !== 3 || parts[0] !== ".incoming" || parts[1] !== selection.incomingConflictId
             || (parts[2].startsWith(".") && !mediaContentType(parts[2])) || recoveryName.test(parts[2])) throw new MediaDeliveryError(404, "Preview unavailable");
@@ -213,6 +218,7 @@ export async function streamMediaFile(request: Request, selection: MediaStreamSe
 export function mediaErrorResponse(request: Request, error: unknown, fallback = "Media unavailable", options: { defaultStatus?: number; json?: boolean } = {}) {
     const code = (error as NodeJS.ErrnoException)?.code;
     const status = error instanceof MediaDeliveryError ? error.status
+        : error instanceof InvalidMediaPathError ? 404
         : error instanceof DestinationBusyError || error instanceof DestinationRecoveryError || error instanceof StorageUnavailableError ? 503
         : ["ENOENT", "ENOTDIR", "ELOOP"].includes(code ?? "") ? 404 : options.defaultStatus ?? 500;
     const body = options.json ? JSON.stringify({ error: fallback }) : fallback;

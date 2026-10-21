@@ -1,3 +1,4 @@
+import { assertFilesystemSegment, assertOriginalMediaPath, assertMediaInputPath } from "./media-paths";
 import { bindReplacementConflict, validateConflictEvidence, type ConflictEvidence, type ResolutionClaim } from "./conflict-resolution-lock";
 import fs from "node:fs/promises";
 import { constants } from "node:fs";
@@ -113,6 +114,8 @@ export async function writeOperationJournal(root: string, directoryName: string,
 
 export async function prepareReplacementJournal(root: string, mediaId: number, stagedPath: string, lock: DestinationLock, conflict?: ResolutionClaim): Promise<ReplacementJournal> {
     if (!Number.isSafeInteger(mediaId) || mediaId <= 0) throw new Error("Invalid replacement media ID");
+    assertOriginalMediaPath(root, lock.destination);
+    assertMediaInputPath(root, stagedPath);
     const operationId = conflict?.operationId ?? randomUUID();
     const original = await identifyReplacementFile(root, lock.destination);
     const incoming = await identifyReplacementFile(root, stagedPath);
@@ -126,6 +129,8 @@ export async function prepareReplacementJournal(root: string, mediaId: number, s
         installationId: process.env.MEDIA_STORAGE_ID!, filesystemUuid: process.env.MEDIA_STORAGE_UUID!,
         original, incoming, state: "PREPARED",
     };
+    assertFilesystemSegment(path.basename(journal.backupPath));
+    assertFilesystemSegment(path.basename(journal.publicationPath!));
     if (conflict) await bindReplacementConflict(root, conflict, journal);
     // Once persistence starts, a failed fsync is an unresolved operation too.
     lock.markUnresolved();
@@ -157,6 +162,8 @@ export async function readReplacementJournal(root: string, operationId: string):
         || journal.installationId !== process.env.MEDIA_STORAGE_ID || journal.filesystemUuid !== process.env.MEDIA_STORAGE_UUID
         || !Number.isSafeInteger(journal.mediaId) || journal.mediaId <= 0
         || journal.backupPath !== `${journal.target}.backup-${operationId}`) throw new Error("Invalid replacement journal identity");
+    assertOriginalMediaPath(storage.root, journal.target);
+    assertMediaInputPath(storage.root, journal.stagedPath);
     for (const identity of [journal.original, journal.incoming]) {
         if (!identity || !/^[0-9a-f]{64}$/.test(identity.sha256)
             || ![identity.size, identity.device, identity.inode].every(value => typeof value === "string" && /^\d+$/.test(value))) throw new Error("Invalid journal file identity");

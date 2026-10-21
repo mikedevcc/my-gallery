@@ -1,3 +1,4 @@
+import { assertStagedMediaPath } from "./media-paths";
 import { acquireResolutionClaim, finishOwnedConflict, releaseUnboundResolutionClaim, type ResolutionClaim } from "./conflict-resolution-lock";
 import { validateStorage } from "./storage-safety";
 import { savePendingConflict } from "./pending-import-conflicts";
@@ -60,6 +61,7 @@ type ConflictResolutionResult =
 async function cleanupStagedJob(stagedPath: string, claim?: ResolutionClaim): Promise<void> {
     if (claim) { await finishOwnedConflict(getMediaStorageRoot(), claim); return; }
     const storage = await validateStorage();
+    assertStagedMediaPath(storage.root, stagedPath);
     await storage.assertAvailable(stagedPath);
     const marker = path.join(path.dirname(stagedPath), ".resolution-lock");
     await storage.assertAvailable(marker);
@@ -113,6 +115,7 @@ export async function processStagedMedia(
     stagedPath: string,
     jobId: string
 ): Promise<ServerImportResult> {
+    assertStagedMediaPath(getMediaStorageRoot(), stagedPath);
     try {
         const imported = await importMedia(stagedPath);
 

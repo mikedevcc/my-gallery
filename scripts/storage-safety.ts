@@ -1,3 +1,4 @@
+import { isReservedStorageName } from "./media-paths";
 import fs from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
@@ -96,6 +97,9 @@ export async function validateStorage(root = getMediaStorageRoot()): Promise<Val
                             const stat = await fs.lstat(candidate, { bigint: true });
                             if (candidate === path.resolve(target) && stat.isSymbolicLink()) throw new Error("Media file/directory must not be a symlink");
                             const real = await fs.realpath(candidate);
+                            const lexicalParts = path.relative(initial.root, path.resolve(target)).split(path.sep);
+                            const realParts = path.relative(initial.root, real).split(path.sep);
+                            if (real !== candidate && [...lexicalParts, ...realParts].some(isReservedStorageName)) throw new Error("Internal storage paths must not use symlink aliases");
                             if (!inside(initial.root, real) || stat.dev !== initial.device || coveringMount(current.entries, real)?.id !== initial.mount.id) throw new Error("Media path is on a different storage mount");
                             break;
                         } catch (error) {

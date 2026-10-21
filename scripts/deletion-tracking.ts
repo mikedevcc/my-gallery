@@ -1,3 +1,4 @@
+import { assertMediaId, assertOriginalMediaPath } from "./media-paths";
 import fs from "node:fs/promises";
 import { constants } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
@@ -81,6 +82,7 @@ export async function syncDeletionCleanup(root: string, destination: string) {
 
 
 export function deletionThumbnailPath(root: string, mediaId: number) {
+    assertMediaId(mediaId);
     return path.join(root, ".thumbnails", `${mediaId}.webp`);
 }
 function validIdentity(value: unknown): value is FileIdentity | null {
@@ -110,6 +112,7 @@ export async function readDeletionJournal(root: string, operationId: string): Pr
         || !/^[0-9a-f-]{36}$/i.test(journal.lockToken) || !validIdentity(journal.original)
         || (journal.thumbnail !== undefined && !validIdentity(journal.thumbnail))
         || typeof journal.target !== "string" || !path.isAbsolute(journal.target)) throw new Error("Invalid deletion journal identity");
+    assertOriginalMediaPath(storage.root, journal.target);
     const relative = path.relative(storage.root, journal.target);
     if (!relative || path.isAbsolute(relative) || relative.split(path.sep).some(part => part === "..")
         || relative.split(path.sep).slice(0, -1).some(part => part.startsWith("."))

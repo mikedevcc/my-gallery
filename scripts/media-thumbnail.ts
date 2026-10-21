@@ -1,3 +1,4 @@
+import { assertMediaId } from "./media-paths";
 import { withDestinationLock } from "./destination-lock";
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -8,7 +9,6 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import {
-    destinationExists,
     getMediaStorageRoot
 } from "./media-storage";
 
@@ -32,7 +32,10 @@ async function createThumbnailLocked(
     const thumbnailPath = path.join(thumbnailDirectory, thumbnailName);
 
     await storage.assertAvailable(thumbnailPath);
-    if (await destinationExists(thumbnailPath)) {
+    let exists = false;
+    try { await fs.access(thumbnailPath); exists = true; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    if (exists) {
         await storage.assertAvailable(thumbnailPath);
         return thumbnailPath;
     }
@@ -73,6 +76,7 @@ async function createThumbnailLocked(
 export async function deleteThumbnail(
     mediaId: number
 ): Promise<void> {
+    assertMediaId(mediaId);
     const thumbnailPath = path.join(
         getMediaStorageRoot(),
         '.thumbnails',
@@ -101,5 +105,6 @@ export async function deleteThumbnail(
 // Serialize cache generation with replacement/deletion so an old generator
 // cannot republish stale bytes after replacement invalidates the cache.
 export async function getOrCreateThumbnail(mediaId: number, mediaPath: string, fileType: "IMAGE" | "VIDEO"): Promise<string> {
+    assertMediaId(mediaId);
     return withDestinationLock(getMediaStorageRoot(), mediaPath, async () => createThumbnailLocked(mediaId, mediaPath, fileType));
 }

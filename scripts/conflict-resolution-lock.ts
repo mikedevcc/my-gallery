@@ -1,3 +1,4 @@
+import { assertStagedMediaPath, canonicalOriginalDestination } from "./media-paths";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -55,7 +56,12 @@ async function requireFile(root: string, location: string, expected: FileIdentit
 export async function acquireResolutionClaim(root: string, conflictId: string, action: ConflictAction, stagedPath: string): Promise<ResolutionClaim> {
     if (!["REPLACE", "KEEP_BOTH", "SKIP"].includes(action)) throw new Error("Invalid conflict action");
     const storage = await validateStorage(root), paths = locations(storage.root, conflictId);
-    if (path.dirname(stagedPath) !== paths.job || [".conflict.json", ".resolution-lock"].includes(path.basename(stagedPath))) throw new Error("Invalid staged conflict path");
+    assertStagedMediaPath(storage.root, stagedPath, conflictId);
+    // Reject an invalid recorded destination before creating a marker/owner.
+    const recorded = JSON.parse((await readStorageFile(paths.metadata)).toString("utf8"));
+    if (recorded.conflictId !== conflictId || recorded.type !== "FILENAME" || typeof recorded.existingPath !== "string") throw new Error("Invalid recorded conflict identity");
+    await canonicalOriginalDestination(storage.root, recorded.existingPath);
+    await storage.assertAvailable(recorded.existingPath);
     await storage.assertAvailable(paths.marker);
     try { await fs.mkdir(paths.marker); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error("This file is already being resolved; ownership review required."); throw error; }
@@ -64,6 +70,7 @@ export async function acquireResolutionClaim(root: string, conflictId: string, a
     const incoming = await identifyReplacementFile(root, stagedPath), metadata = await identifyReplacementFile(root, paths.metadata);
     const conflict = JSON.parse((await readStorageFile(paths.metadata)).toString("utf8"));
     if (conflict.conflictId !== conflictId || conflict.type !== "FILENAME" || typeof conflict.existingPath !== "string") throw new Error("Invalid recorded conflict identity");
+    await canonicalOriginalDestination(storage.root, conflict.existingPath);
     await storage.assertAvailable(conflict.existingPath);
     const operationId = randomUUID(), token = randomUUID();
     const owner = { version: 1, operationId, token, conflictId, action, stagedPath, target: conflict.existingPath, incoming, metadata, job, marker,
@@ -84,6 +91,7 @@ export function validateConflictEvidence(root: string, journal: ReplacementJourn
     const evidence = journal.conflict;
     if (!evidence) return;
     const paths = locations(root, evidence.conflictId);
+    assertStagedMediaPath(root, journal.stagedPath, evidence.conflictId);
     const identity = (value: FileIdentity | undefined) => value && /^[0-9a-f]{64}$/.test(value.sha256)
         && [value.size, value.device, value.inode].every(x => typeof x === "string" && /^\d+$/.test(x));
     const directory = (value: DirectoryIdentity | undefined) => value && [value.device, value.inode].every(x => typeof x === "string" && /^\d+$/.test(x));

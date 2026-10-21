@@ -1,3 +1,4 @@
+import { assertMediaInputPath } from "./media-paths";
 import "dotenv/config";
 import { validateStorage } from "./storage-safety";
 
@@ -193,6 +194,7 @@ async function inspectMediaFile(
     const extension = path.extname(absolutePath).toLowerCase();
     
     const storage = await validateStorage();
+    assertMediaInputPath(storage.root, filePath);
     await storage.assertAvailable(absolutePath);
     const stats = await fs.stat(absolutePath);
     await storage.assertAvailable(absolutePath);

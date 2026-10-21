@@ -1,3 +1,4 @@
+import { assertStagedMediaPath, canonicalOriginalDestination } from "./media-paths";
 import fs from "node:fs/promises";
 import { validateStorage, readStorageFile, StorageUnavailableError } from "./storage-safety";
 import path from "node:path";
@@ -10,6 +11,11 @@ import { findMediaByPath, getMediaFileById } from "./media-database";
 const metadataName = ".conflict.json";
 export async function savePendingConflict(stagedPath: string, conflict: ImportConflict) {
     const storage = await validateStorage();
+    assertStagedMediaPath(storage.root, stagedPath, conflict.conflictId);
+    if (conflict.type === "FILENAME") {
+        await canonicalOriginalDestination(storage.root, conflict.existingPath);
+        await storage.assertAvailable(conflict.existingPath);
+    }
     const metadataPath = path.join(path.dirname(stagedPath), metadataName);
     await storage.assertAvailable(metadataPath);
     await fs.writeFile(metadataPath, JSON.stringify(conflict));
@@ -32,6 +38,8 @@ export async function listPendingConflicts(): Promise<ImportConflict[]> {
             const metadataPath = path.join(incoming, entry.name, metadataName);
             try {
                 const conflict = JSON.parse((await readStorageFile(metadataPath)).toString("utf8")) as ImportConflict;
+                if (conflict.conflictId !== entry.name) throw new Error("Invalid conflict identity");
+                if (conflict.type === "FILENAME") await canonicalOriginalDestination(storage.root, conflict.existingPath);
                 conflicts.push(conflict);
                 continue;
             } catch (error) {
@@ -68,6 +76,8 @@ export async function getConflictPreviewSelection(conflictId: string, side: stri
         : conflict.type === "HASH" && side === "incoming" ? (await getMediaFileById(conflict.existingMediaId))?.path : undefined;
     if (typeof destination !== "string") throw new Error("Preview unavailable");
     const storage = await validateStorage();
+    await canonicalOriginalDestination(storage.root, destination);
+    await storage.assertAvailable(destination);
     const resolution = path.join(path.dirname(stagedPath), ".resolution-lock");
     await storage.assertAvailable(resolution);
     try { await fs.lstat(resolution); throw new Error("Conflict is being resolved"); }

@@ -74,7 +74,7 @@ test("deletion excludes replacement and releases after successful cleanup", () =
         deleteMetadata: async () => { entered.open(); await finish.promise; return true; }, afterDelete: async () => {} });
     await entered.promise;
     try {
-        await assert.rejects(() => replaceMediaAtDestination({ mediaId: 1, readReceipt: async () => undefined, root, destination, stagedPath: unusedStagedPath,
+        await assert.rejects(() => replaceMediaAtDestination({ mediaId: 1, readReceipt: async () => undefined, root, destination, stagedPath: path.join(root, "unused.jpg"),
             revalidateMetadata: async () => {}, updateMetadata: async () => {} }), DestinationBusyError);
     } finally { finish.open(); await deletion; }
     assert.equal(await fs.stat(destination).then(() => true, () => false), false);
@@ -82,7 +82,6 @@ test("deletion excludes replacement and releases after successful cleanup", () =
 }));
 
 // Deliberately nonexistent: contention must fail before any staging-file access.
-const unusedStagedPath = "/not-a-user-media-path/unused.jpg";
 
 test("different destinations progress while one operation waits", () => fixture(async (root, destination) => {
     const entered = gate(); const finish = gate();
@@ -157,7 +156,7 @@ test("replacement staging-cleanup failure retains both generations and ownership
 
 test("destination and metadata are revalidated before mutation", () => fixture(async (root, destination) => {
     let updated = false;
-    await assert.rejects(() => replaceMediaAtDestination({ mediaId: 1, readReceipt: async () => undefined, root, destination, stagedPath: unusedStagedPath,
+    await assert.rejects(() => replaceMediaAtDestination({ mediaId: 1, readReceipt: async () => undefined, root, destination, stagedPath: path.join(root, "unused.jpg"),
         revalidateMetadata: async () => { await fs.writeFile(destination, "external change"); },
         updateMetadata: async () => { updated = true; } }), /Destination changed/);
     assert.equal(updated, false);
@@ -193,7 +192,7 @@ test("finalization holds lock through metadata insertion and locks alternate can
 test("finalization cannot occupy a target temporarily absent during replacement", () => fixture(async (root, destination) => {
     const lock = await acquireDestinationLock(root, destination); lock.markUnresolved();
     const backup = `${destination}.backup`; await fs.rename(destination, backup);
-    await assert.rejects(() => finalizeStagedMedia(unusedStagedPath, destination, undefined, root), DestinationBusyError);
+    await assert.rejects(() => finalizeStagedMedia(path.join(root, "unused.jpg"), destination, undefined, root), DestinationBusyError);
     await fs.rename(backup, destination); lock.markSafe(); await lock.release();
 }));
 
