@@ -135,7 +135,7 @@ test("storage loss during DELETE rolls metadata transaction back before commit a
     try {
         await assert.rejects(() => deleteMediaAtDestination({ mediaId: 1, root, destination, revalidateMetadata: async () => true,
             deleteMetadata: async (guard, receipt) => (await deleteMediaById(1, guard, receipt)) !== undefined, afterDelete: async () => {} }));
-        assert.deepEqual(queries, ["BEGIN", "SET", "SELECT", "DELETE", "INSERT", "ROLLBACK"]);
+        assert.deepEqual(queries, ["BEGIN", "SET", "SELECT", "SELECT", "SELECT", "SELECT", "DELETE", "INSERT", "UPDATE", "ROLLBACK"]);
         assert.equal(releases, 1);
         assert.equal(await fs.readFile(destination, "utf8"), "original");
     } finally { checkout.mock.restore(); }

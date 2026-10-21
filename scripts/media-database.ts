@@ -1,3 +1,4 @@
+import { CollectionIntegrityError, collectionId, collectionIds, coordinateAlbumDeletion, lockCollectionMedia, lockAlbums, lockTrips, repairAlbumCovers } from "./collection-integrity";
 import { databaseConnectionString, RuntimeConfigurationError } from "./runtime-config";
 import type { DeletionEvidence } from "./deletion-recovery";
 import type { DeletionReceipt } from "./deletion-tracking";
@@ -115,7 +116,7 @@ export type AlbumRow = {
     album_id: number;
     album_name: string;
     media_count: number;
-    cover_media_id: number;
+    cover_media_id: number | null;
 }
 
 
@@ -645,23 +646,25 @@ export async function getMediaByTripId(
 }
 
 
-export async function addMediaToTrip(
-    mediaId: number,
-    tripId: number
-): Promise<void> {
+export async function addMediaToTrip(mediaIds: number | number[], tripId: number): Promise<number> {
+    const ids = collectionIds(typeof mediaIds === "number" ? [mediaIds] : mediaIds);
+    collectionId(tripId);
     const client = await getPool().connect();
-
     try {
-        await client.query(
-            `UPDATE media
-            SET trip_id = $1
-            WHERE media_id = $2`,
-            [tripId, mediaId]
-        );
-    }
-    finally {
-        client.release();
-    }
+        await client.query("BEGIN");
+        await lockTrips(client, [tripId]);
+        const media = await lockCollectionMedia(client, ids);
+        const missing = ids.filter(id => !media.some(row => row.media_id === id));
+        if (missing.length) throw new CollectionIntegrityError("Media not found", 404, missing);
+        const assigned = media.filter(row => row.trip_id !== null).map(row => row.media_id);
+        if (assigned.length) throw new CollectionIntegrityError("Media already belongs to a Trip; use Move Media", 409, assigned);
+        const result = await client.query<{ media_id: number }>(
+            `UPDATE media SET trip_id = $1 WHERE media_id = ANY($2::int[]) AND trip_id IS NULL RETURNING media_id`, [tripId, ids]);
+        if (result.rows.length !== ids.length) throw new CollectionIntegrityError("Trip membership changed; retry selection");
+        await client.query("COMMIT");
+        return result.rowCount ?? result.rows.length;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
 }
 
 
@@ -808,10 +811,15 @@ export async function moveMediaToTrip(
     sourceTripId: number,
     targetTripId: number
 ): Promise<number[]> {
+    const ids = collectionIds(mediaIds);
+    collectionId(sourceTripId); collectionId(targetTripId);
+    if (sourceTripId === targetTripId) throw new CollectionIntegrityError("Source and target Trips are the same", 400);
     const client = await getPool().connect()
 
     try {
         await client.query("BEGIN");
+        await lockTrips(client, [sourceTripId, targetTripId]);
+        await lockCollectionMedia(client, ids);
 
         const result = await client.query(
             `UPDATE media
@@ -822,7 +830,7 @@ export async function moveMediaToTrip(
             [
                 targetTripId,
                 sourceTripId,
-                mediaIds
+                ids
             ]
         );
 
@@ -830,7 +838,7 @@ export async function moveMediaToTrip(
             row => row.media_id
         );
     
-        const failedMediaIds = mediaIds.filter(
+        const failedMediaIds = ids.filter(
             mediaId => 
                 !movedMediaIds.includes(mediaId)
         );
@@ -866,6 +874,13 @@ export async function deleteMediaById(
         await client.query("SET LOCAL synchronous_commit = on");
         await lockReplacementTransaction(client, receipt.operationId);
         await verifyStorage();
+        await coordinateAlbumDeletion(client, true);
+        await lockCollectionMedia(client, [mediaId]);
+        // The exclusive transaction guard stabilizes membership discovery. All
+        // Album writers hold its shared counterpart before locking Album rows.
+        const albums = await client.query<{ album_id: number }>(`SELECT a.album_id FROM album a
+            WHERE a.album_id IN (SELECT ma.album_id FROM media_album ma WHERE ma.media_id = $1)
+               OR a.cover_media_id = $1 ORDER BY a.album_id FOR UPDATE`, [mediaId]);
         const result = await client.query<DeletedMediaRow>(
             `DELETE FROM media WHERE media_id = $1 AND path = $2 RETURNING media_id, path`,
             [mediaId, receipt.target]);
@@ -873,6 +888,7 @@ export async function deleteMediaById(
         await client.query(`INSERT INTO public.media_deletion_receipts
             (operation_id, media_id, target_path, original_identity) VALUES ($1, $2, $3, $4::jsonb)`,
             [receipt.operationId, mediaId, receipt.target, JSON.stringify(receipt.original)]);
+        await repairAlbumCovers(client, albums.rows.map(row => row.album_id));
         await verifyStorage();
         await client.query("COMMIT");
         return result.rows[0];
@@ -1030,207 +1046,78 @@ export async function getMediaByAlbumId(
 }
 
 
-export async function addMediaToAlbum(
-    mediaId: number,
-    albumId: number
-): Promise<void> {
+export async function addMediaToAlbum(mediaId: number, albumId: number): Promise<number> {
+    collectionId(mediaId); collectionId(albumId);
     const client = await getPool().connect();
-
     try {
-        await client.query('BEGIN');
-
-        await client.query(
-            `INSERT INTO media_album (
-                media_id,
-                album_id
-             )
-             VALUES ($1, $2)
-             ON CONFLICT (media_id, album_id)
-             DO NOTHING`,
-            [mediaId, albumId]
-        );
-
-        await client.query(
-            `UPDATE album
-             SET cover_media_id = (
-                 SELECT MIN(media_id)
-                 FROM media_album
-                 WHERE album_id = $1
-             )
-             WHERE album_id = $1
-               AND cover_media_id IS NULL`,
-            [albumId]
-        );
-
-        await client.query('COMMIT');
-    }
-    catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-    }
-    finally {
-        client.release();
-    }
+        await client.query("BEGIN");
+        await coordinateAlbumDeletion(client);
+        await lockAlbums(client, [albumId]);
+        const media = await lockCollectionMedia(client, [mediaId], true);
+        if (!media.length) throw new CollectionIntegrityError("Media not found", 404, [mediaId]);
+        const result = await client.query(`INSERT INTO media_album (media_id, album_id) VALUES ($1, $2)
+            ON CONFLICT (media_id, album_id) DO NOTHING RETURNING media_id`, [mediaId, albumId]);
+        await repairAlbumCovers(client, [albumId]);
+        await client.query("COMMIT");
+        return result.rowCount ?? result.rows.length;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
 }
 
-
-export async function removeMediaFromAlbum(
-    mediaId: number,
-    albumId: number
-): Promise<boolean> {
+export async function removeMediaFromAlbum(mediaId: number, albumId: number): Promise<boolean> {
+    collectionId(mediaId); collectionId(albumId);
     const client = await getPool().connect();
-
     try {
-        await client.query('BEGIN');
-
-        const result = await client.query(
-            `DELETE FROM media_album
-             WHERE media_id = $1
-               AND album_id = $2`,
-            [mediaId, albumId]
-        );
-
-        if (result.rowCount !== 1) {
-            await client.query('ROLLBACK');
-            return false;
-        }
-
-        await client.query(
-            `UPDATE album
-             SET cover_media_id = (
-                 SELECT MIN(media_id)
-                 FROM media_album
-                 WHERE album_id = $1
-             )
-             WHERE album_id = $1
-               AND cover_media_id = $2`,
-            [albumId, mediaId]
-        );
-
-        await client.query('COMMIT');
-
+        await client.query("BEGIN");
+        await coordinateAlbumDeletion(client);
+        await lockAlbums(client, [albumId]);
+        await lockCollectionMedia(client, [mediaId], true);
+        const result = await client.query(`DELETE FROM media_album WHERE media_id = $1 AND album_id = $2 RETURNING media_id`, [mediaId, albumId]);
+        if (result.rowCount !== 1) { await client.query("ROLLBACK"); return false; }
+        await repairAlbumCovers(client, [albumId]);
+        await client.query("COMMIT");
         return true;
-    }
-    catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-    }
-    finally {
-        client.release();
-    }
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
 }
 
-
-export async function moveMediaToAlbum(
-    mediaIds: number[],
-    sourceAlbumId: number,
-    targetAlbumId: number
-): Promise<void> {
+async function transferAlbumMedia(mediaIds: number[], sourceAlbumId: number, targetAlbumId: number, move: boolean): Promise<number> {
+    const ids = collectionIds(mediaIds);
+    collectionId(sourceAlbumId); collectionId(targetAlbumId);
+    if (sourceAlbumId === targetAlbumId) throw new CollectionIntegrityError("Source and target Albums are the same", 400);
     const client = await getPool().connect();
-
     try {
-        await client.query('BEGIN');
-
-        await client.query(
-            `INSERT INTO media_album (
-                media_id,
-                album_id
-             )
-             SELECT
-                media_id,
-                $1
-             FROM media_album
-             WHERE album_id = $2
-               AND media_id = ANY($3::int[])
-             ON CONFLICT (media_id, album_id)
-             DO NOTHING`,
-            [
-                targetAlbumId,
-                sourceAlbumId,
-                mediaIds,
-            ]
-        );
-
-        await client.query(
-            `DELETE FROM media_album
-             WHERE album_id = $1
-               AND media_id = ANY($2::int[])`,
-            [
-                sourceAlbumId,
-                mediaIds,
-            ]
-        );
-
-        await client.query(
-            `UPDATE album
-             SET cover_media_id = (
-                SELECT MIN(media_id)
-                FROM media_album
-                WHERE album_id = $1
-             )
-             WHERE album_id = $1
-             AND cover_media_id = ANY($2::int[]);`,
-             [
-                sourceAlbumId,
-                mediaIds,
-             ]
-        )
-
-        await client.query(
-            `UPDATE album
-             SET cover_media_id = (
-                SELECT MIN(media_id)
-                FROM media_album
-                WHERE album_id = $1
-             )
-             WHERE album_id = $1
-                AND cover_media_id IS NULL`,
-            [targetAlbumId]
-        );
-
-        await client.query('COMMIT');
-    }
-    catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-    }
-    finally {
-        client.release();
-    }
+        await client.query("BEGIN");
+        await coordinateAlbumDeletion(client);
+        await lockAlbums(client, [sourceAlbumId, targetAlbumId]);
+        const media = await lockCollectionMedia(client, ids, true);
+        const absent = ids.filter(id => !media.some(row => row.media_id === id));
+        if (absent.length) throw new CollectionIntegrityError("Media not found", 404, absent);
+        const source = await client.query<{ media_id: number }>(`SELECT media_id FROM media_album
+            WHERE album_id = $1 AND media_id = ANY($2::int[]) ORDER BY media_id`, [sourceAlbumId, ids]);
+        const missing = ids.filter(id => !source.rows.some(row => row.media_id === id));
+        if (missing.length) throw new CollectionIntegrityError("Selection is no longer part of the source Album", 409, missing);
+        const inserted = await client.query(`INSERT INTO media_album (media_id, album_id)
+            SELECT media_id, $1 FROM media_album WHERE album_id = $2 AND media_id = ANY($3::int[])
+            ON CONFLICT (media_id, album_id) DO NOTHING RETURNING media_id`, [targetAlbumId, sourceAlbumId, ids]);
+        let count = inserted.rowCount ?? inserted.rows.length;
+        if (move) {
+            const removed = await client.query(`DELETE FROM media_album WHERE album_id = $1 AND media_id = ANY($2::int[]) RETURNING media_id`, [sourceAlbumId, ids]);
+            count = removed.rowCount ?? removed.rows.length;
+            if (count !== ids.length) throw new CollectionIntegrityError("Source Album membership changed; retry selection");
+        }
+        await repairAlbumCovers(client, [sourceAlbumId, targetAlbumId]);
+        await client.query("COMMIT");
+        return count;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
 }
 
-
-export async function copyMediaToAlbum(
-    mediaIds: number[],
-    sourceAlbumId: number,
-    targetAlbumId: number
-): Promise<void> {
-    const client = await getPool().connect();
-
-    try {
-        await client.query(
-            `INSERT INTO media_album (
-                media_id,
-                album_id
-             )
-             SELECT
-                media_id,
-                $1
-             FROM media_album
-             WHERE album_id = $2
-               AND media_id = ANY($3::int[])
-             ON CONFLICT (media_id, album_id)
-             DO NOTHING`,
-            [
-                targetAlbumId,
-                sourceAlbumId,
-                mediaIds,
-            ]
-        );
-    }
-    finally {
-        client.release();
-    }
+export async function moveMediaToAlbum(mediaIds: number[], sourceAlbumId: number, targetAlbumId: number): Promise<number> {
+    return transferAlbumMedia(mediaIds, sourceAlbumId, targetAlbumId, true);
+}
+export async function copyMediaToAlbum(mediaIds: number[], sourceAlbumId: number, targetAlbumId: number): Promise<number> {
+    return transferAlbumMedia(mediaIds, sourceAlbumId, targetAlbumId, false);
 }
 
 
@@ -1320,23 +1207,18 @@ export async function renameAlbum(
 }
 
 
-export async function deleteAlbum(
-    albumId: number
-): Promise<boolean> {
+export async function deleteAlbum(albumId: number): Promise<boolean> {
+    collectionId(albumId);
     const client = await getPool().connect();
-
     try {
-        const result = await client.query(
-            `DELETE FROM album
-             WHERE album_id = $1`,
-            [albumId]
-        );
-
+        await client.query("BEGIN");
+        await coordinateAlbumDeletion(client);
+        // The FK cascades only membership rows; media records are preserved.
+        const result = await client.query(`DELETE FROM album WHERE album_id = $1`, [albumId]);
+        await client.query("COMMIT");
         return result.rowCount === 1;
-    }
-    finally {
-        client.release();
-    }
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
 }
 
 // Read the primary database; failures must never be interpreted as a missing receipt.

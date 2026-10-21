@@ -56,8 +56,11 @@ async function withPool<T>(options: Options, operation: (state: {
                 parameters.push(values);
                 if (sql === "ROLLBACK" && options.failRollback) throw new Error("injected rollback failure");
                 if (queries.length === options.failQuery) throw error;
+                if (sql.startsWith("SELECT trip_id FROM trip WHERE trip_id = ANY")) return { rows: (values[0] as number[]).map(trip_id => ({ trip_id })), rowCount: (values[0] as number[]).length };
+                if (sql.startsWith("SELECT album_id FROM album WHERE album_id = ANY")) return { rows: (values[0] as number[]).map(album_id => ({ album_id })), rowCount: (values[0] as number[]).length };
                 const response = options.response?.(sql);
                 if (response) return response;
+                if (sql.startsWith("SELECT media_id, trip_id FROM media WHERE media_id = ANY")) return { rows: (values[0] as number[]).map(media_id => ({ media_id, trip_id: null })), rowCount: (values[0] as number[]).length };
                 if (sql.includes("pg_is_in_recovery")) return { rows: [{ standby: false }], rowCount: 1 };
                 if (sql.includes("pg_try_advisory_xact_lock")) return { rows: [{ locked: true }], rowCount: 1 };
                 if (sql.includes("FROM public.media_replacement_receipts")) return { rows: [], rowCount: 0 };
@@ -248,9 +251,9 @@ test("deletion receipt and expected path are written before COMMIT in the deleti
 });
 
 test("receipt insertion failure rolls metadata deletion back", async () => {
-    await withPool({ failQuery: 5 }, async ({ queries, error }) => {
+    await withPool({ failQuery: 8 }, async ({ queries, error }) => {
         await assert.rejects(database.deleteMediaById(1, async () => {}, deletionReceipt), actual => actual === error);
-        assert.match(queries[4], /INSERT INTO public.media_deletion_receipts/);
+        assert.match(queries[7], /INSERT INTO public.media_deletion_receipts/);
         assert.equal(queries.at(-1), "ROLLBACK");
         assert.ok(!queries.includes("COMMIT"));
     });

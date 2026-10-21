@@ -96,25 +96,14 @@ export function TripMediaPicker({
         setError(null);
 
         try {
-            for (const mediaId of selected) {
-                const response = await fetch(
-                    `/api/trips/${tripId}/media`,
-                    {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            mediaId,
-                        }),
-                    }
-                );
-
-                if (!response.ok) {
-                    throw new Error(
-                        `Failed to add media ${mediaId}`
-                    );
-                }
+            const response = await fetch(`/api/trips/${tripId}/media`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mediaIds: selected }),
+            });
+            if (!response.ok) {
+                const result = await response.json() as { error?: string };
+                throw new Error(result.error ?? 'Failed to add selected media');
             }
 
             onAdded();
