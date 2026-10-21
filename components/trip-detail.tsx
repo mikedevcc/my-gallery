@@ -75,7 +75,7 @@ export function TripDetail({
     const [moveModalOpen, setMoveModalOpen] = useState(false);
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
-    const [group, setGroup] = useState<'All' | 'Days'>('All');
+    const [group, setGroup] = useState<'All' | 'Months' | 'Days'>('All');
 
 
     const router = useRouter();
@@ -425,7 +425,7 @@ export function TripDetail({
 
                 <div className="timeline-controls">
                     <div className="segmented">
-                        {['All', 'Days'].map(value => (
+                        {['All', 'Months', 'Days'].map(value => (
                             <button
                                 key={value}
                                 className={
@@ -436,7 +436,7 @@ export function TripDetail({
                                 onClick={() =>
                                     setGroup(
                                         value as
-                                            'All' | 'Days'
+                                            'All' | 'Months' | 'Days'
                                     )
                                 }
                             >

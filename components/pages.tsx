@@ -219,6 +219,7 @@ export function PhotosPage() {
                     aria-label="Group media by"
                 >
                     {[
+                        'All',
                         'Years',
                         'Months',
                         'Days',
@@ -228,6 +229,7 @@ export function PhotosPage() {
                             onClick={() =>
                                 setGroup(
                                     value as
+                                        'All' |
                                         'Years' |
                                         'Months' |
                                         'Days'

@@ -82,7 +82,7 @@ export function AlbumDetail({
     ] = useState<'move' | 'copy' | null>(null);
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
-    const [group, setGroup] = useState<'All' | 'Days'>('All');
+    const [group, setGroup] = useState<'All' | 'Years' | 'Months' | 'Days'>('All');
 
 
     const router = useRouter();
@@ -409,7 +409,7 @@ export function AlbumDetail({
             <div className="album-controls-wrapper">
                 <div className="timeline-controls">
                     <div className="segmented">
-                        {['All', 'Days'].map(value => (
+                        {['All', 'Years', 'Months','Days'].map(value => (
                             <button
                                 key={value}
                                 className={
@@ -420,7 +420,10 @@ export function AlbumDetail({
                                 onClick={() =>
                                     setGroup(
                                         value as
-                                            'All' | 'Days'
+                                            'All' | 
+                                            'Years' |
+                                            'Months' |
+                                            'Days'
                                     )
                                 }
                             >
