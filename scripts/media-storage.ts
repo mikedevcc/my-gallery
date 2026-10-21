@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 
 import type { ImportedMedia } from "./media-import";
+import { withDestinationLock, type DestinationLock } from "./destination-lock";
 
 
 export type ReplacementState = {
@@ -125,69 +126,31 @@ export async function stageMediaFile(
 export async function finalizeStagedMedia(
     stagedPath: string,
     destinationPath: string,
+    onFinalized?: (finalPath: string) => Promise<void>,
+    root = storageRoot,
 ): Promise<string> {
-    // Ensure destination folder exists
-    const destinationDir = path.dirname(destinationPath);
-
-    await fs.mkdir(destinationDir, { recursive: true });
-
-    const { name, ext } = path.parse(destinationPath);
-
-    let altCount = 0;
-
-    while (true) {
-        // First attempt: original filename
-        // Subsequent attempts: filename (1), filename (2), etc.
-        const fileName = altCount === 0
-            ? `${name}${ext}`
-            : `${name} (${altCount})${ext}`;
-
-        const finalPath = path.join(destinationDir, fileName);
-
-        try {
-            // Fails with EEXIST if destination already exists
-            await fs.link(stagedPath, finalPath);
-        }
-        catch (error) {
-            const fsError = error as NodeJS.ErrnoException;
-
-            if (fsError.code === "EEXIST") {
-                console.warn("[media-import] Finalization collision", {
-                    stagedPath,
-                    destinationPath,
-                    finalPath,
-                });
-                altCount++;
-                continue;
-            }
-
-            // Permission errors, missing source, etc.
-            throw error;
-        }
-
-        // Final file now exists. Remove its staging name.
-        try {
+    const { name, ext, dir } = path.parse(destinationPath);
+    for (let count = 0; ; count++) {
+        const candidate = path.join(dir, count === 0 ? `${name}${ext}` : `${name} (${count})${ext}`);
+        const result = await withDestinationLock(root, candidate, async lock => {
+            // Even an absent candidate must lock: replacement can temporarily move
+            // its original to a backup. Never bypass a busy target via a new name.
+            await lock.revalidate();
+            if (await destinationExists(lock.destination)) return undefined;
+            await fs.mkdir(path.dirname(lock.destination), { recursive: true });
+            await lock.revalidate();
+            lock.markUnresolved();
+            await fs.link(stagedPath, lock.destination);
+            // Hold the destination through metadata insertion and staging cleanup.
+            // Uncertain DB outcomes retain both file names and the lock for review.
+            await onFinalized?.(lock.destination);
             await fs.unlink(stagedPath);
-        }
-        catch (error) {
-            // Undo the newly created final link if staging cleanup fails
-            try {
-                await fs.unlink(finalPath);
-            }
-            catch (cleanupError) {
-                console.error(
-                    "Failed to clean up final file:",
-                    cleanupError
-                );
-            }
-
-            throw error;
-        }
-
-        return finalPath;
+            lock.markSafe();
+            return lock.destination;
+        });
+        if (result !== undefined) return result;
     }
 }
-
 
 export async function destinationExists(
     destinationPath: string
@@ -217,17 +180,32 @@ export async function destinationExists(
 
 
 export async function removeStagedConflict(
-    conflictId: string
+    conflictId: string,
+    root = storageRoot,
 ): Promise<void> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(conflictId)) {
+        throw new Error("Invalid conflict ID");
+    }
     const conflictPath = path.join(
-        storageRoot,
+        root,
         ".incoming",
         conflictId
     );
 
-    await fs.rm(conflictPath, {
-        recursive: true,
-        force: true,
+    // A retained target lock may still need this staged generation for review.
+    // Legacy conflicts without saved metadata must first be recovered/listed.
+    const metadataPath = path.join(conflictPath, ".conflict.json");
+    const metadata = await fs.readFile(metadataPath, "utf8");
+    const conflict = JSON.parse(metadata) as { type?: string; existingPath?: string };
+    if (conflict.type !== "FILENAME" || typeof conflict.existingPath !== "string") {
+        throw new Error("Cannot safely discard a conflict without a recorded destination");
+    }
+    await withDestinationLock(root, conflict.existingPath, async lock => {
+        if (await fs.readFile(metadataPath, "utf8") !== metadata) throw new Error("Conflict metadata changed; retry after review");
+        await lock.revalidate();
+        lock.markUnresolved();
+        await fs.rm(conflictPath, { recursive: true, force: true });
+        lock.markSafe();
     });
 }
 
@@ -277,10 +255,14 @@ export async function findStagedConflictFile(
 
 export async function beginMediaReplacement(
     stagedPath: string,
-    destinationPath: string
+    destinationPath: string,
+    lock: DestinationLock,
 ): Promise<ReplacementState> {
+    await lock.assertOwned(destinationPath);
+    await lock.revalidate();
     const backupPath = `${destinationPath}.backup-${randomUUID()}`;
     
+    lock.markUnresolved();
     // move existing destination to backup
     await fs.rename(
         destinationPath,
@@ -317,16 +299,20 @@ export async function beginMediaReplacement(
 
 
 export async function commitMediaReplacement(
-    replacement: ReplacementState
+    replacement: ReplacementState,
+    lock: DestinationLock,
 ): Promise<void> {
+    await lock.assertOwned(replacement.destinationPath);
     await fs.unlink(replacement.stagedPath);
     await fs.rm(replacement.backupPath, { force: true });
 }
 
 
 export async function rollbackMediaReplacement(
-    replacement: ReplacementState
+    replacement: ReplacementState,
+    lock: DestinationLock,
 ): Promise<void> {
+    await lock.assertOwned(replacement.destinationPath);
     await fs.rm(replacement.destinationPath, { force: true });
 
     await fs.rename(
@@ -337,8 +323,10 @@ export async function rollbackMediaReplacement(
 
 
 export async function deleteStoredMedia(
-    mediaPath: string
+    mediaPath: string,
+    lock: DestinationLock,
 ): Promise<void> {
+    await lock.assertOwned(mediaPath);
     try {
         await fs.unlink(mediaPath);
     }

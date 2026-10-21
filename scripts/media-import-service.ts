@@ -1,4 +1,6 @@
 import { savePendingConflict } from "./pending-import-conflicts";
+import { DestinationBusyError, DestinationRecoveryError } from "./destination-lock";
+import { replaceMediaAtDestination } from "./media-mutations";
 import path from "node:path";
 import fs from "node:fs/promises";
 
@@ -12,16 +14,13 @@ import {
     updateImportedMedia,
 } from "./media-database";
 import { 
-    removeEmptyParentDirectories,
     buildDestinationPath, 
     stageMediaFile, 
     finalizeStagedMedia,
+    storageRoot,
     destinationExists,
     findStagedConflictFile,
     removeStagedConflict,
-    beginMediaReplacement,
-    commitMediaReplacement,
-    rollbackMediaReplacement,
 } from "./media-storage";
 import { 
     resolveLocation, 
@@ -70,11 +69,38 @@ async function cleanupStagedJob(stagedPath: string): Promise<void> {
 }
 
 
+async function finalizeImportedMedia(
+    stagedPath: string,
+    destination: string,
+    imported: ImportedMedia,
+    location: ResolvedLocation,
+    keepBoth = false,
+): Promise<number> {
+    let mediaId: number | undefined;
+    await finalizeStagedMedia(stagedPath, destination, async finalPath => {
+        mediaId = await insertImportedMedia({
+            ...imported,
+            file: {
+                ...imported.file,
+                absolutePath: finalPath,
+                fileName: keepBoth ? path.basename(finalPath) : imported.file.fileName,
+            },
+        }, location.country, location.city);
+    });
+    if (mediaId === undefined) throw new Error("Finalization did not return a media ID");
+    await cleanupStagedJob(stagedPath);
+    return mediaId;
+}
+
+function mustPreserveStaging(error: unknown): boolean {
+    return error instanceof DestinationBusyError || error instanceof DestinationRecoveryError;
+}
+
+
 export async function processStagedMedia(
     stagedPath: string,
     jobId: string
 ): Promise<ServerImportResult> {
-    let finalPath: string | undefined;
     try {
         const imported = await importMedia(stagedPath);
 
@@ -125,23 +151,7 @@ export async function processStagedMedia(
             return { type: "CONFLICT", conflict };
         }
 
-        finalPath = await finalizeStagedMedia(stagedPath, destination);
-
-        await cleanupStagedJob(stagedPath);
-        
-        const storedImported: ImportedMedia = {
-            ...imported,
-            file: {
-                ...imported.file,
-                absolutePath: finalPath,
-            },
-        };
-        
-        const media_id =  await insertImportedMedia(
-            storedImported,
-            location.country,
-            location.city
-        );
+        const media_id = await finalizeImportedMedia(stagedPath, destination, imported, location);
 
         return {
             type: "COMPLETED",
@@ -149,17 +159,7 @@ export async function processStagedMedia(
         };
     }
     catch (error) {
-        await cleanupStagedJob(stagedPath);
-
-        if (finalPath !== undefined) {
-            try {
-                await fs.rm(finalPath, { force: true });
-                await removeEmptyParentDirectories(finalPath);
-            }
-            catch (cleanupError){
-                console.error("Failed to clean up finalized file:", cleanupError);
-            }
-        }
+        if (!mustPreserveStaging(error)) await cleanupStagedJob(stagedPath);
 
         throw error;
     }
@@ -190,8 +190,6 @@ async function applyStagedConflictResolution(
     else if (action === "KEEP_BOTH") {
         const stagedPath = await findStagedConflictFile(conflictId);
 
-        let finalPath: string | undefined;
-
         try {
             const imported = await importMedia(stagedPath);
         
@@ -206,24 +204,7 @@ async function applyStagedConflictResolution(
 
             const destination = buildDestinationPath(imported, location.city);
 
-            finalPath = await finalizeStagedMedia(stagedPath, destination);
-
-            await cleanupStagedJob(stagedPath);
-
-            const storedImported: ImportedMedia = {
-                ...imported,
-                file: {
-                    ...imported.file,
-                    fileName: path.basename(finalPath),
-                    absolutePath: finalPath,
-                },
-            };
-            
-            const media_id =  await insertImportedMedia(
-                storedImported,
-                location.country,
-                location.city
-            );
+            const media_id = await finalizeImportedMedia(stagedPath, destination, imported, location, true);
 
             return {
                 type: "COMPLETED",
@@ -231,17 +212,7 @@ async function applyStagedConflictResolution(
             };
         }
         catch (error) {
-            await cleanupStagedJob(stagedPath);
-
-            if (finalPath !== undefined) {
-                try {
-                    await fs.rm(finalPath, { force: true });
-                    await removeEmptyParentDirectories(finalPath);
-                }
-                catch (cleanupError){
-                    console.error("Failed to clean up finalized file:", cleanupError);
-                }
-            }
+            if (!mustPreserveStaging(error)) await cleanupStagedJob(stagedPath);
 
             throw error;
         }
@@ -281,32 +252,17 @@ async function applyStagedConflictResolution(
             },
         };
 
-        const replacementState = await beginMediaReplacement(stagedPath, destination);
-        
-        try {
-            await updateImportedMedia(
-                mediaId,
-                storedImported,
-                location.country,
-                location.city
-            );
-        }
-        catch (error) {
-            await rollbackMediaReplacement(replacementState);
-            throw error;
-        }
-
-        // DB succeeded: replacement is now authoritative
-        try {
-            await commitMediaReplacement(replacementState);
-            await cleanupStagedJob(stagedPath);
-        }
-        catch (cleanupError) {
-            console.error(
-                "Replacement succeeded but cleanup failed:",
-                cleanupError
-            );
-        }
+        await replaceMediaAtDestination({
+            root: storageRoot,
+            destination,
+            stagedPath,
+            revalidateMetadata: async () => {
+                const current = await findMediaByPath(destination);
+                if (current?.media_id !== mediaId) throw new Error("Replacement target changed; review the conflict again");
+            },
+            updateMetadata: () => updateImportedMedia(mediaId, storedImported, location.country, location.city),
+        });
+        await cleanupStagedJob(stagedPath);
 
         return {
             type: "COMPLETED",

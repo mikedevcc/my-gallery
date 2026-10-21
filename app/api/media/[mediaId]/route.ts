@@ -1,6 +1,7 @@
 import { getMediaDetailsById, setMediaFavorite } from "@/scripts/media-database";
-import { deleteMediaById } from "@/scripts/media-database";
-import { deleteStoredMedia } from "@/scripts/media-storage";
+import { deleteMediaById, getMediaFileById } from "@/scripts/media-database";
+import { storageRoot } from "@/scripts/media-storage";
+import { deleteMediaAtDestination } from "@/scripts/media-mutations";
 import { deleteThumbnail } from "@/scripts/media-thumbnail";
 
 
@@ -63,7 +64,24 @@ export async function DELETE(
         );
     }
 
-    const deleted = await deleteMediaById(parsedMediaId);
+    const media = await getMediaFileById(parsedMediaId);
+
+    const deleted = media && await deleteMediaAtDestination({
+        root: storageRoot,
+        destination: media.path,
+        revalidateMetadata: async () => {
+            const current = await getMediaFileById(parsedMediaId);
+            if (!current) return false;
+            if (current.path !== media.path) throw new Error("Media path changed; retry deletion");
+            return true;
+        },
+        deleteMetadata: async () => {
+            const row = await deleteMediaById(parsedMediaId);
+            if (row && row.path !== media.path) throw new Error("Deleted media path changed; manual recovery required");
+            return row !== undefined;
+        },
+        afterDelete: () => deleteThumbnail(parsedMediaId),
+    });
 
     if (!deleted) {
         return Response.json(
@@ -71,10 +89,6 @@ export async function DELETE(
             { status: 404 }
         );
     }
-
-    await deleteStoredMedia(deleted.path);
-
-    await deleteThumbnail(deleted.media_id);
 
     return Response.json({message: 'Media deleted',});
 }
