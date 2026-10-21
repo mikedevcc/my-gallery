@@ -62,7 +62,7 @@ test("replacement excludes deletion before its database delete", () => fixture(a
     await entered.promise;
     let deleted = false;
     try {
-        await assert.rejects(() => deleteMediaAtDestination({ root, destination,
+        await assert.rejects(() => deleteMediaAtDestination({ mediaId: 1, root, destination,
             revalidateMetadata: async () => true, deleteMetadata: async () => { deleted = true; return true; }, afterDelete: async () => {} }), DestinationBusyError);
         assert.equal(deleted, false);
     } finally { finish.open(); await first; }
@@ -70,7 +70,7 @@ test("replacement excludes deletion before its database delete", () => fixture(a
 
 test("deletion excludes replacement and releases after successful cleanup", () => fixture(async (root, destination) => {
     const entered = gate(); const finish = gate();
-    const deletion = deleteMediaAtDestination({ root, destination, revalidateMetadata: async () => true,
+    const deletion = deleteMediaAtDestination({ mediaId: 1, root, destination, revalidateMetadata: async () => true,
         deleteMetadata: async () => { entered.open(); await finish.promise; return true; }, afterDelete: async () => {} });
     await entered.promise;
     try {
@@ -131,7 +131,7 @@ test("replacement database failure preserves both generations and an unresolved 
 }));
 
 test("deletion database failures retain original and lock", () => fixture(async (root, destination) => {
-    await assert.rejects(() => deleteMediaAtDestination({ root, destination, revalidateMetadata: async () => true,
+    await assert.rejects(() => deleteMediaAtDestination({ mediaId: 1, root, destination, revalidateMetadata: async () => true,
         deleteMetadata: async () => { throw new Error("uncertain database delete"); }, afterDelete: async () => {} }), DestinationRecoveryError);
     assert.equal(await fs.readFile(destination, "utf8"), "original");
     await assert.rejects(() => acquireDestinationLock(root, destination), DestinationBusyError);
@@ -162,7 +162,7 @@ test("destination and metadata are revalidated before mutation", () => fixture(a
         updateMetadata: async () => { updated = true; } }), /Destination changed/);
     assert.equal(updated, false);
     const lock = await acquireDestinationLock(root, destination); await lock.release();
-    assert.equal(await deleteMediaAtDestination({ root, destination, revalidateMetadata: async () => false,
+    assert.equal(await deleteMediaAtDestination({ mediaId: 1, root, destination, revalidateMetadata: async () => false,
         deleteMetadata: async () => { throw new Error("must not run"); }, afterDelete: async () => {} }), false);
 }));
 

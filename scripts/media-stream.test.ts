@@ -168,7 +168,7 @@ test("pinned streams survive atomic replacement and deletion without switching g
     });
     assert.equal(await old.text(), "0123456789");
     const current = await streamMediaFile(request(), selection);
-    await deleteMediaAtDestination({ root, destination: target, revalidateMetadata: async () => true,
+    await deleteMediaAtDestination({ mediaId: 1, root, destination: target, revalidateMetadata: async () => true,
         deleteMetadata: async () => true, afterDelete: async () => {},
     });
     assert.equal(await current.text(), "replacement"); await assert.rejects(streamMediaFile(request(), selection));

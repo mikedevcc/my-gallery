@@ -258,3 +258,20 @@ replacement traffic; creating this file does not apply it. No database was used
 for H4-B validation: SQL discovery/safety checks and mocked transaction tests are
 offline only. See [the recovery protocol](../../docs/replacement-recovery.md)
 for H4-C atomic publication, guarded recovery, durability assumptions and backups.
+
+## Deletion receipts (0003 / M1-A)
+
+`0003_media_deletion_receipts.sql` adds `public.media_deletion_receipts` without
+changing existing tables. Each operation UUID records the deleted media ID,
+canonical path, original SHA-256/size/device/inode identity and commit timestamp.
+`original_identity` is JSON null only for a file verified absent on available
+storage. Receipts intentionally have no foreign key and survive media deletion.
+
+Apply this forward migration before deploying M1-A deletion code, through the
+normal reviewed migration procedure; do not run it on application startup. Grant
+the runtime role INSERT on this table (and SELECT for future recovery). A missing
+receipt table makes deletion roll back, retain its journal/lock and fail safely.
+Migration 0003 has not been executed as part of this implementation.
+
+See [deletion tracking](../../docs/deletion-tracking.md) for durability and the
+current manual-investigation requirement. Never edit applied 0001 or 0002.

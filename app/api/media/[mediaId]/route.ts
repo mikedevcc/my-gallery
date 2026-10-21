@@ -67,6 +67,7 @@ export async function DELETE(
     const media = await getMediaFileById(parsedMediaId);
 
     const deleted = media && await deleteMediaAtDestination({
+        mediaId: parsedMediaId,
         root: getMediaStorageRoot(),
         destination: media.path,
         revalidateMetadata: async () => {
@@ -75,9 +76,8 @@ export async function DELETE(
             if (current.path !== media.path) throw new Error("Media path changed; retry deletion");
             return true;
         },
-        deleteMetadata: async verifyStorage => {
-            const row = await deleteMediaById(parsedMediaId, verifyStorage);
-            if (row && row.path !== media.path) throw new Error("Deleted media path changed; manual recovery required");
+        deleteMetadata: async (verifyStorage, receipt) => {
+            const row = await deleteMediaById(parsedMediaId, verifyStorage, receipt);
             return row !== undefined;
         },
         afterDelete: () => deleteThumbnail(parsedMediaId),

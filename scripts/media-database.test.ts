@@ -4,6 +4,8 @@ import { Pool, type PoolClient } from "pg";
 import * as database from "./media-database";
 import type { ImportedMedia } from "./media-import";
 
+const deletionReceipt = { operationId: "12345678-1234-4234-8234-123456789abc", mediaId: 1, target: "/test/test.jpg", original: { sha256: "a".repeat(64), size: "100", device: "1", inode: "2" } };
+
 const image: ImportedMedia = {
     file: { fileName: "test.jpg", fileType: "IMAGE", fileSize: 100, absolutePath: "/test/test.jpg", extension: ".jpg" },
     media: {},
@@ -56,7 +58,7 @@ async function withPool<T>(options: Options, operation: (state: {
                 if (sql.includes("pg_try_advisory_xact_lock")) return { rows: [{ locked: true }], rowCount: 1 };
                 if (sql.includes("FROM public.media_replacement_receipts")) return { rows: [], rowCount: 0 };
                 if (sql.startsWith("SELECT media_id FROM media WHERE path")) return { rows: [], rowCount: 0 };
-                return { rows: [{ media_id: 1, trip_id: 1, album_id: 1, country_id: 1, city_id: 1 }], rowCount: 1 };
+                return { rows: [{ media_id: 1, path: "/test/test.jpg", trip_id: 1, album_id: 1, country_id: 1, city_id: 1 }], rowCount: 1 };
             },
             release: () => { state.releases++; },
         } as unknown as PoolClient;
@@ -85,7 +87,7 @@ const operations: Record<Exclude<keyof typeof database, "closeMediaDatabase">, (
     getMediaDetailsById: () => database.getMediaDetailsById(1),
     getAvailableMedia: () => database.getAvailableMedia(),
     moveMediaToTrip: () => database.moveMediaToTrip([1], 1, 2),
-    deleteMediaById: () => database.deleteMediaById(1, async () => {}),
+    deleteMediaById: () => database.deleteMediaById(1, async () => {}, deletionReceipt),
     getLibraryMedia: () => database.getLibraryMedia(),
     getAlbums: () => database.getAlbums(),
     createAlbum: () => database.createAlbum("album"),
@@ -220,5 +222,39 @@ test("no receipt can commit for a missing media row or mismatched target", async
     await withPool({}, async ({ clients }) => {
         await assert.rejects(database.updateImportedMedia(2, image, undefined, undefined, { receipt, assertStorage: async () => {} }), /does not match/);
         assert.equal(clients.length, 0);
+    });
+});
+
+test("deletion receipt and expected path are written before COMMIT in the deletion transaction", async () => {
+    let validations = 0;
+    await withPool({}, async ({ queries, parameters }) => {
+        await database.deleteMediaById(1, async () => { validations++; }, deletionReceipt);
+        assert.equal(validations, 2);
+        assert.equal(queries[0], "BEGIN");
+        assert.equal(queries[1], "SET LOCAL synchronous_commit = on");
+        assert.match(queries[2], /pg_try_advisory_xact_lock/);
+        const deletion = queries.findIndex(sql => sql.startsWith("DELETE"));
+        assert.deepEqual(parameters[deletion], [1, deletionReceipt.target]);
+        assert.match(queries[deletion], /AND path = \$2/);
+        assert.match(queries[deletion + 1], /INSERT INTO public.media_deletion_receipts/);
+        assert.deepEqual(parameters[deletion + 1], [deletionReceipt.operationId, 1, deletionReceipt.target, JSON.stringify(deletionReceipt.original)]);
+        assert.equal(queries.at(-1), "COMMIT");
+    });
+});
+
+test("receipt insertion failure rolls metadata deletion back", async () => {
+    await withPool({ failQuery: 5 }, async ({ queries, error }) => {
+        await assert.rejects(database.deleteMediaById(1, async () => {}, deletionReceipt), actual => actual === error);
+        assert.match(queries[4], /INSERT INTO public.media_deletion_receipts/);
+        assert.equal(queries.at(-1), "ROLLBACK");
+        assert.ok(!queries.includes("COMMIT"));
+    });
+});
+
+test("changed deletion path rolls back without writing a receipt", async () => {
+    await withPool({ response: sql => sql.startsWith("DELETE") ? { rows: [], rowCount: 0 } : undefined }, async ({ queries }) => {
+        await assert.rejects(database.deleteMediaById(1, async () => {}, deletionReceipt), /metadata changed/);
+        assert.equal(queries.at(-1), "ROLLBACK");
+        assert.ok(!queries.some(sql => sql.startsWith("INSERT")));
     });
 });

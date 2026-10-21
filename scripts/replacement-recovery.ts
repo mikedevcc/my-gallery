@@ -44,7 +44,7 @@ export async function syncReplacementPath(root: string, target: string): Promise
     await storage.assertAvailable(target);
 }
 
-async function syncParents(root: string, target: string): Promise<void> {
+export async function syncParents(root: string, target: string): Promise<void> {
     let directory = path.dirname(target);
     while (directory !== root) {
         await syncReplacementPath(root, directory);
@@ -85,12 +85,19 @@ function journalPath(root: string, operationId: string): string {
 }
 
 export async function writeReplacementJournal(root: string, journal: ReplacementJournal, lock: DestinationLock): Promise<void> {
+    await writeOperationJournal(root, journalDirectory, journal, lock);
+}
+
+// Shared durable writer for lock-bound media operation journals.
+export async function writeOperationJournal(root: string, directoryName: string,
+    journal: { operationId: string; target: string }, lock: DestinationLock): Promise<void> {
+    if (!uuid.test(journal.operationId) || ![".replacement-operations", ".deletion-operations"].includes(directoryName)) throw new Error("Invalid operation journal location");
     await lock.assertOwned(journal.target);
     const storage = await validateStorage(root);
-    const directory = path.join(root, journalDirectory);
+    const directory = path.join(root, directoryName);
     await createStorageDirectory(storage, directory);
     await syncReplacementPath(root, root);
-    const target = journalPath(root, journal.operationId);
+    const target = path.join(directory, `${journal.operationId}.json`);
     await storage.assertAvailable(target);
     const temporary = `${target}.${randomUUID()}.tmp`;
     const handle = await fs.open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);

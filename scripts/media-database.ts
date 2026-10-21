@@ -1,3 +1,4 @@
+import type { DeletionReceipt } from "./deletion-tracking";
 import type { ReplacementEvidence } from "./replacement-files";
 import type { ReplacementReceipt } from "./replacement-recovery";
 import type { ImportedMedia } from "./media-import";
@@ -849,32 +850,30 @@ export async function moveMediaToTrip(
 export async function deleteMediaById(
     mediaId: number,
     verifyStorage: () => Promise<void>,
+    receipt: DeletionReceipt,
 ): Promise<DeletedMediaRow | undefined> {
+    if (receipt.mediaId !== mediaId) throw new Error("Deletion receipt media mismatch");
     const client = await pool.connect();
-
     try {
         await client.query("BEGIN");
+        await client.query("SET LOCAL synchronous_commit = on");
+        await lockReplacementTransaction(client, receipt.operationId);
         await verifyStorage();
         const result = await client.query<DeletedMediaRow>(
-                `DELETE FROM media
-                 WHERE media_id = $1
-                 RETURNING
-                    media_id,
-                    path`,
-                [mediaId]
-            );
-
+            `DELETE FROM media WHERE media_id = $1 AND path = $2 RETURNING media_id, path`,
+            [mediaId, receipt.target]);
+        if (result.rowCount !== 1 || result.rows[0]?.path !== receipt.target) throw new Error("Deletion target metadata changed");
+        await client.query(`INSERT INTO public.media_deletion_receipts
+            (operation_id, media_id, target_path, original_identity) VALUES ($1, $2, $3, $4::jsonb)`,
+            [receipt.operationId, mediaId, receipt.target, JSON.stringify(receipt.original)]);
         await verifyStorage();
         await client.query("COMMIT");
         return result.rows[0];
-    }
-    catch (error) {
-        await client.query("ROLLBACK");
+    } catch (error) {
+        try { await client.query("ROLLBACK"); }
+        catch (rollbackError) { throw new AggregateError([error, rollbackError], "Deletion outcome unresolved; rollback failed"); }
         throw error;
-    }
-    finally {
-        client.release();
-    }
+    } finally { client.release(); }
 }
 
 

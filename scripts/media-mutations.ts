@@ -1,3 +1,4 @@
+import { prepareDeletionJournal, writeDeletionJournal, deletionReceiptFor, assertDeletionIdentity, syncDeletionCleanup, type DeletionReceipt } from "./deletion-tracking";
 import fs from "node:fs/promises";
 import { publishReplacement, reconcileReplacement, type RecoveryDatabase } from "./replacement-files";
 import { prepareReplacementJournal, receiptFor, writeReplacementJournal, type ReplacementReceipt } from "./replacement-recovery";
@@ -60,23 +61,42 @@ export async function replaceMediaAtDestination(options: {
 }
 
 export async function deleteMediaAtDestination(options: {
+    mediaId: number;
     root: string;
     destination: string;
     revalidateMetadata: () => Promise<boolean>;
-    deleteMetadata: (assertStorage: () => Promise<void>) => Promise<boolean>;
+    deleteMetadata: (assertStorage: () => Promise<void>, receipt: DeletionReceipt) => Promise<boolean>;
     afterDelete: () => Promise<void>;
 }): Promise<boolean> {
     return withDestinationLock(options.root, options.destination, async lock => {
         if (!await options.revalidateMetadata()) return false;
         await lock.revalidate();
-        lock.markUnresolved();
-        await lock.assertOwned();
-        if (!await options.deleteMetadata(() => lock.assertOwned())) {
-            lock.markSafe();
-            return false;
+        const journal = await prepareDeletionJournal(options.root, options.mediaId, lock);
+        journal.state = "COMMIT_PENDING";
+        await writeDeletionJournal(options.root, journal, lock);
+        const verify = async () => {
+            await lock.assertOwned();
+            await lock.revalidate();
+            await assertDeletionIdentity(options.root, lock.destination, journal.original);
+        };
+        try {
+            if (!await options.deleteMetadata(verify, deletionReceiptFor(journal))) {
+                throw new Error("Deletion metadata changed; destination requires investigation");
+            }
+        } catch (error) {
+            journal.state = "COMMIT_UNKNOWN";
+            try { await writeDeletionJournal(options.root, journal, lock); }
+            catch (journalError) { throw new AggregateError([error, journalError], "Deletion outcome and journal update are unresolved"); }
+            throw error;
         }
+        journal.state = "COMMITTED";
+        await writeDeletionJournal(options.root, journal, lock);
+        await verify();
         await deleteStoredMedia(lock.destination, lock);
         await options.afterDelete();
+        await syncDeletionCleanup(options.root, lock.destination);
+        journal.state = "COMPLETE";
+        await writeDeletionJournal(options.root, journal, lock);
         lock.markSafe();
         return true;
     });

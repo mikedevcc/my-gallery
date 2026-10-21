@@ -111,7 +111,7 @@ test("operation snapshots reject remounts and nested mounts", () => fixture(asyn
 test("deletion never invokes metadata removal while storage is unavailable", () => fixture(async (root, mount) => {
     const destination = path.join(root, "original.jpg"); await fs.writeFile(destination, "original");
     let deletions = 0;
-    const options = { root, destination, revalidateMetadata: async () => true,
+    const options = { mediaId: 1, root, destination, revalidateMetadata: async () => true,
         deleteMetadata: async () => { deletions++; return true; }, afterDelete: async () => {} };
     mount.state.mounted = false;
     await assert.rejects(() => deleteMediaAtDestination(options), StorageUnavailableError);
@@ -129,13 +129,13 @@ test("storage loss during DELETE rolls metadata transaction back before commit a
         query: async (text: string) => {
             const sql = text.trim().split(/\s+/)[0]; queries.push(sql);
             if (sql === "DELETE") mount.state.mounted = false;
-            return { rows: [{ media_id: 1, path: destination }], rowCount: 1 };
+            return { rows: [{ media_id: 1, path: destination, locked: true }], rowCount: 1 };
         }, release: () => { releases++; },
     }) as unknown as PoolClient);
     try {
-        await assert.rejects(() => deleteMediaAtDestination({ root, destination, revalidateMetadata: async () => true,
-            deleteMetadata: async guard => (await deleteMediaById(1, guard)) !== undefined, afterDelete: async () => {} }));
-        assert.deepEqual(queries, ["BEGIN", "DELETE", "ROLLBACK"]);
+        await assert.rejects(() => deleteMediaAtDestination({ mediaId: 1, root, destination, revalidateMetadata: async () => true,
+            deleteMetadata: async (guard, receipt) => (await deleteMediaById(1, guard, receipt)) !== undefined, afterDelete: async () => {} }));
+        assert.deepEqual(queries, ["BEGIN", "SET", "SELECT", "DELETE", "INSERT", "ROLLBACK"]);
         assert.equal(releases, 1);
         assert.equal(await fs.readFile(destination, "utf8"), "original");
     } finally { checkout.mock.restore(); }
