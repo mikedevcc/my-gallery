@@ -1,130 +1,157 @@
-# Replacement recovery tracking (H4-B)
+# Atomic replacement and crash recovery (H4-C)
 
-This release records evidence for H4-C; it does **not** automatically recover an
-interrupted operation, restore backups, retry metadata, or clear retained locks.
-Only replacement operations have journals/receipts. Import and deletion still
-have the conservative destination-lock behavior described in
-[destination locking](destination-locking.md).
+Replacement uses the existing destination lock, validated local HDD and migration
+0002 receipts. Neither historical migration changes. Deploy 0002 **before** this
+code and stop/drain all older writers before upgrading. This protocol assumes all
+writers share the same local filesystem **and Linux PID namespace**, including
+visible `/proc` process start times and boot ID. Run writers and recovery as the
+same Unix service account; cross-user recovery is refused because `hidepid`
+permissions can otherwise make a live process appear absent. It supports the documented single
+Debian installation, not independently deployed hosts sharing network storage.
 
-## Deployment prerequisite
+## Publication and transaction ordering
 
-Review and apply `0002_replacement_receipts.sql` through the normal versioned SQL
-runner in a separately authorized deployment window, after coordinated database
-and media backups. It has not been executed as part of this change. Deploy the
-migration before enabling replacement traffic; remove older writer processes.
-The runtime role needs SELECT and INSERT on `public.media_replacement_receipts`
-in addition to its existing metadata privileges. Do not grant receipt UPDATE or
-DELETE to the runtime role. Receipts deliberately have no foreign key: they remain
-usable evidence after a media row is deleted. There is no automatic retention/GC.
+1. Hold the canonical destination lock; revalidate metadata, storage and file
+   identities. Staging must have a different inode from the original.
+2. Bind the owner record to an operation UUID. Persist the protocol-2 journal
+   containing the lock token, target, backup, staging/publication paths, original
+   and incoming SHA-256/size/device/inode identities and installation/filesystem
+   IDs. Sync media files, directory parent chains, owner record and journal.
+3. Create an exclusive **hard link** from the original target to its unique backup
+   and fsync the destination directory. The target remains readable throughout.
+4. Link staging to the unique publication path, sync its directory, verify both
+   identities again, and atomically rename publication over the target on the
+   same filesystem. Sync the destination directory before attempting metadata.
+5. Persist FILES_PUBLISHED then COMMIT_PENDING. Metadata and receipt INSERT use
+   one PostgreSQL transaction with `synchronous_commit=on`. The transaction first
+   acquires `pg_try_advisory_xact_lock(hashtextextended(operationId, 48291))`.
+   No replacement metadata write may precede that lock. A storage/owner guard
+   runs again before COMMIT.
+6. After confirmed commit, verify the incoming target and all remaining evidence,
+   invalidate its thumbnail, remove only matching staging/publication/backup
+   files, syncing each affected directory, and persist COMPLETE before releasing
+   destination ownership. Thumbnail generation now acquires the destination lock
+   too, so a previous generator cannot republish stale cache after invalidation.
 
-## Durable evidence and states
+The original backup remains intact until commit is confirmed. Neither publication
+nor rollback unlinks the destination before replacing it. PostgreSQL and the
+filesystem still do not share an atomic transaction: readers can see new bytes
+before metadata commits. Existing readers with open descriptors can finish
+reading the old inode. HTTP clients may retain previously returned thumbnails.
 
-A replacement holds the existing canonical destination lock throughout. Metadata
-and target existence are revalidated. Before the original is moved, it records
-`<MEDIA_STORAGE_ROOT>/.replacement-operations/<operation UUID>.json` containing:
-installation ID, filesystem UUID, media ID, canonical target, incoming staging
-path, unique backup path, lock directory, original/incoming SHA-256 hashes,
-byte sizes, device/inode identities, and recovery state. Hashing streams files and
-checks that their identities remain stable during the read.
+## States and interrupted operations
 
-Journal updates write an exclusive mode-0600 temporary file, fsync that file,
-atomically rename it over the JSON, then fsync the journal directory. Initial
-preparation syncs both media files, their parent chains, and the lock owner and
-lock directories. Directory creation is allowed only after live storage validation;
-the configured storage root and installation marker are never created here.
-All mutation steps retain storage/ownership validation. An fsync error fails closed.
-
-| State | Meaning / interruption window |
+| State | Meaning |
 | --- | --- |
-| PREPARED | Durable intent exists before the first rename. Publication might be untouched, partially completed, or complete. |
-| FILES_PUBLISHED | Incoming target and original backup names have been synced in the destination directory. Metadata has not yet been attempted. |
-| COMMIT_PENDING | Durable intent to update metadata. The transaction may not have started, may still be in flight, or may have committed. |
-| COMMIT_UNKNOWN | Metadata callback failed, including a possible lost COMMIT response. No filesystem rollback or cleanup is attempted. |
-| COMMITTED | Metadata/receipt transaction acknowledged commit. Backup and staging cleanup may be incomplete. |
-| COMPLETE | Cleanup directories and final journal have been synced. Lock release or outer staging-job cleanup may still be interrupted. |
+| PREPARED | Durable intent precedes backup/publication; either step may be partial. |
+| FILES_PUBLISHED | Incoming target directory is synced; metadata not yet attempted. |
+| COMMIT_PENDING | Database work may not have started, may be running, or may have committed. |
+| COMMIT_UNKNOWN | Metadata callback failed, including possible lost acknowledgement. |
+| COMMITTED | Transaction acknowledged commit; cleanup may be incomplete. |
+| COMPLETE | Committed cleanup and journal are durable; lock release may still be interrupted. |
+| ROLLED_BACK | Original restored and synced, safe auxiliary cleanup complete; incoming staging retained for explicit retry. |
 
-Before publication, a read checks the receipt store and operation ID. An absent
-migration, failed query, or unexpected existing receipt stops publication and
-retains the prepared journal/lock for review. Receipt-store availability is not a
-substitute for the later transaction succeeding.
+The normal request path tries guarded reconciliation after a failure. A fresh
+READ COMMITTED, read-only database transaction acquires the **same operation lock**
+nonblockingly, then queries the receipt and current media path. Thus absence can
+be used only after any original metadata transaction has finished. A busy lock,
+query error, missing metadata or mismatched receipt leaves the operation locked.
+A lost acknowledgement with a matching receipt completes cleanup and returns
+success. A definitely uncommitted operation restores the original, then reports
+the original failure to the caller.
 
-Metadata updates and receipt INSERT use the **same PostgreSQL client and
-transaction**. A missing media row aborts the transaction. The receipt binds the
-operation UUID to media ID, destination and original/incoming hashes; its primary
-key prevents reuse. `SET LOCAL synchronous_commit = on` requires a local durable
-commit acknowledgement, subject to PostgreSQL's fsync/storage configuration. The
-storage/lock guard runs again immediately before COMMIT. Any error attempts
-ROLLBACK and releases the client; a failed COMMIT response never proves rollback.
+Reconciliation validates every surviving file using both hashes and inode/device
+identity before its first mutation. For rollback it verifies the original backup
+and expected target, then atomically renames the backup over the target. If a
+previous recovery already restored it, the matching original target suffices.
+For committed operations the incoming target must already match; recovery never
+publishes unexpected bytes or repeats metadata SQL. Unknown or missing required
+bytes remain locked for investigation. Staging is retained after rollback.
 
-A successful receipt is authoritative evidence of metadata commit even if the
-journal still says COMMIT_PENDING or COMMIT_UNKNOWN. The application preserves
-both file generations, staging and ownership after a metadata error; it no longer
-blindly restores the old bytes on a potentially committed transaction.
+## Recovery after a process restart
 
-## Read-only reconciliation, ready for H4-C
-
-`scripts/replacement-recovery.ts` exposes `readReplacementJournal` and
-`inspectReplacementRecovery(root, operationId, lookupReceipt, databaseSettled?)`.
-These are internal helpers, not an automatic startup task or a recovery CLI.
-Use the primary database receipt reader `getReplacementReceipt`; query failures
-propagate. Inspection validates storage and journal identity, compares receipt
-fields, and hashes each surviving target/backup/staged file. It returns database
-COMMITTED, UNKNOWN, NOT_COMMITTED or INCONSISTENT plus observed file dispositions.
-Repeated inspection writes nothing and is idempotent while the evidence is stable.
-A conflicting receipt is INCONSISTENT; unrecognized bytes are OTHER and require
-manual investigation. Identical original/incoming bytes are classified INCOMING;
-recorded inode identities remain available for forensic review.
-
-Before reliable recovery review, stop **all** writers and independently establish
-that the original database transaction has finished (including disconnected or
-partitioned sessions). An absent receipt is UNKNOWN by default. Only then may a
-caller explicitly pass `databaseSettled=true` to interpret absence as
-NOT_COMMITTED. That parameter is an external attestation, not proof provided by
-the helper. A journal state alone never substitutes for this check. Never query a
-lagging replica, treat a timeout as absence, or use lock age/PID absence as proof.
-Inspect against the same primary/history as the operation: a database restore or
-failover that lost acknowledged transactions invalidates this inference.
-
-Preserve journals, temporary journal files, owner records, backups, staging and
-receipts together. Do not rerun an unresolved replacement, delete its conflict,
-manually clear locks, prune evidence, or replay its metadata until the outcome is
-reviewed. H4-C must validate lock ownership and actual bytes again before any
-repair, make repair steps restartable, and establish a safe lock-release policy.
-No repair/delete command is added by H4-B.
-
-## Limitations
-
-The existing rename-original / hard-link-incoming publication sequence remains.
-Readers can see a missing target or a transient metadata/bytes mismatch. Power loss
-can leave any partially completed sequence described above. Filesystem and
-PostgreSQL do not form one atomic transaction. H4-B preserves evidence and avoids
-blind rollback but does not restore availability or consistency automatically.
-Deletion/import crash recovery, thumbnail cache races and binding previewed
-conflicts to an exact generation remain outside this change.
-
-The supported local Linux ext4/XFS mount must provide correct atomic rename,
-hard-link and directory fsync semantics. All paths must remain on the validated
-HDD. No NFS/SMB, hostile/nonparticipating filesystem writers, lying disk write
-caches or broken storage hardware are covered. Mount checks cannot eliminate a
-physical disconnect between a check and a syscall. PostgreSQL fsync/full-page
-writes and durable disk flush behavior must be correctly configured. Backup and
-restore must preserve corresponding database receipts and filesystem evidence.
-Completed journals are historical snapshots: later operations can legitimately
-change their target bytes. They do not authorize restoring an older generation;
-H4-C must distinguish the current unresolved owner from completed operations.
-Journals/receipts are retained indefinitely and contain paths; restrict access and
-plan a separately reviewed retention policy.
-
-## Offline checks
+Recovery is an explicit maintenance command, **not** an automatic startup hook.
+Stop/drain gallery writers before maintenance. Preserve database/media backups and
+all journal, owner, staging and backup evidence. Restore the expected mounted HDD
+and installation marker first. Set configuration explicitly; this command never
+loads `.env` or uses a default database.
 
 ```sh
+# Set MEDIA_STORAGE_ROOT, MEDIA_STORAGE_UUID, MEDIA_STORAGE_ID and a protected
+# MEDIA_RECOVERY_DATABASE_URL for the SAME primary database as the operation.
+node --import tsx scripts/recover-media.ts OPERATION_UUID \
+  --host localhost --port 5432 --database mygallery \
+  --confirm-installation "$MEDIA_STORAGE_ID"
+```
+
+The example is an operator command, not authorization to run it during review.
+It verifies the configured database, role, port and PostgreSQL 17 before recovery.
+The database role needs SELECT on media/receipts and permission to use advisory
+locks; the recovery transaction makes no persistent database changes.
+
+Recovery holds the PostgreSQL operation lock while claiming the **existing**
+filesystem lock. It checks that the journal's canonical key, operation UUID and
+owner token agree, then proves the prior filesystem worker stopped using boot ID,
+PID and process start time. A live worker is never evicted; neither lock age nor
+PID absence by itself establishes commit outcome. Database locking separately
+protects against a transaction still finishing after its Node worker died.
+The recovery owner record is durably updated so recovery can itself restart.
+Concurrent recovery attempts are excluded by the PostgreSQL operation lock.
+
+Repeated recovery returns ALREADY_COMPLETE after a terminal journal's lock is
+released, without touching a later generation. If another operation now owns the
+same destination, the old journal cannot claim or release its lock. Completed
+journals are historical evidence, not permission to restore an older original.
+
+The read-only H4-B `inspectReplacementRecovery` helper remains available for
+investigation. Its `databaseSettled` argument is only external attestation; use the
+H4-C guarded recovery command for mutations rather than treating that flag as proof.
+
+## Manual investigation cases
+
+Recovery deliberately stops for a live/unverifiable owner, busy database lock,
+wrong storage device, conflicting receipt, lost database history, changed media
+path, unknown file identity, missing original backup, or committed receipt with
+no matching incoming target. Keep writers stopped and retain all evidence; inspect
+against the primary, resolve the discrepancy explicitly, and then retry. Do not
+remove a lock, replay metadata, or delete staging based on age or a timeout.
+
+H4-B journals without protocol-2 publication/owner information and legacy owner
+records without process identity require manual investigation; they are not
+silently upgraded. Ownerless/nonterminal lock directories also require manual
+review. A crash during initial lock creation or final owner unlink/rmdir can leave
+such a directory; automatic deletion could race a new owner. There is no force,
+reset, age-based takeover, or manual-repair bypass in the CLI. If an unresolved
+request's owner process is still alive, stop it before maintenance recovery.
+
+Do not infer absence after restoring a database backup or failing over to a server
+that lost acknowledged transactions. Confirm the corresponding primary history
+and coordinated filesystem backup before deciding an outcome.
+
+## Durability boundaries and verification
+
+Requires local Linux ext4/XFS with correct hard-link, atomic rename and directory
+fsync behavior, PostgreSQL durable WAL/fsync configuration and working hardware
+flushes. Physical disconnects between validation and syscalls, broken hardware,
+nonparticipating writers and manual SQL are outside the protocol. Journals and
+receipts are retained indefinitely; access/retention policies need separate review.
+Import/deletion crash recovery is not added by H4-C. Existing destination locking
+still excludes them while replacement/recovery is unresolved.
+
+Offline checks use temporary media and mocked mount/SQL probes:
+
+```sh
+node --import tsx scripts/replacement-files.test.ts
 node --import tsx scripts/replacement-recovery.test.ts
 node --import tsx scripts/media-database.test.ts
 node --import tsx scripts/destination-lock.test.ts
 node --import tsx scripts/storage-safety.test.ts
-node --import tsx scripts/migrations/core.test.ts
 ```
 
-Fixtures use temporary files, mocked mount probes and mocked PostgreSQL clients.
-They exercise interrupted sequences and injected persistence failures; they are
-not real PostgreSQL integration, physical power-loss, or HDD durability tests.
+The crash suite kills worker processes at preparation, backup, publication,
+pre-commit, lost acknowledgement, committed journal, cleanup and completion, plus
+kills recovery after restoration. A separate opt-in
+`replacement-postgres.test.ts` refuses all but the positively identified disposable
+cluster/database; normal invocation skips it. It verifies real SQL rollback,
+transactional receipts, acknowledgement reconciliation and in-flight advisory
+locking. These tests are not physical power-cut or production-volume tests.

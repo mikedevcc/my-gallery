@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { processIdentity, processHasStopped } from "./process-identity";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { createStorageDirectory, validateStorage } from "./storage-safety";
@@ -43,6 +44,8 @@ export type DestinationLock = {
     destination: string;
     directory: string;
     unresolved: boolean;
+    token: string;
+    bindOperation(operationId: string): Promise<void>;
     markUnresolved(): void;
     markSafe(): void;
     assertOwned(destination?: string): Promise<void>;
@@ -51,7 +54,7 @@ export type DestinationLock = {
     release(): Promise<void>;
 };
 
-export async function acquireDestinationLock(storageRoot: string, destination: string): Promise<DestinationLock> {
+export async function acquireDestinationLock(storageRoot: string, destination: string, recovery?: { operationId: string; token: string }): Promise<DestinationLock> {
     const storage = await validateStorage(storageRoot);
     const root = storage.root;
     const canonical = await canonicalDestination(root, destination);
@@ -66,24 +69,50 @@ export async function acquireDestinationLock(storageRoot: string, destination: s
     // root is mounted at different absolute paths by separate processes.
     const directory = path.join(locks, createHash("sha256").update(path.relative(root, canonical)).digest("hex"));
     await storage.assertAvailable(directory);
-    try { await fs.mkdir(directory); }
-    catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new DestinationBusyError("Media destination is locked; retry after completion or request recovery review");
-        throw error;
+    if (!recovery) {
+        try { await fs.mkdir(directory); }
+        catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new DestinationBusyError("Media destination is locked; retry after completion or request recovery review");
+            throw error;
+        }
     }
-    // A failure here intentionally leaves a blocking directory, never an unlocked
-    // target with uncertain ownership. There is no time-based lock eviction.
-    const token = randomUUID();
+    const token = recovery?.token ?? randomUUID();
     const ownerPath = path.join(directory, "owner.json");
-    const identity = await fs.lstat(directory, { bigint: true });
     await storage.assertAvailable(ownerPath);
-    await fs.writeFile(ownerPath, JSON.stringify({ token, destination: canonical, pid: process.pid }), { flag: "wx" });
+    const identity = await fs.lstat(directory, { bigint: true });
+    const self = await processIdentity();
+    if (recovery) {
+        // Caller MUST hold the operation's PostgreSQL advisory lock throughout.
+        const previous = JSON.parse(await fs.readFile(ownerPath, "utf8"));
+        if (previous.token !== token || previous.operationId !== recovery.operationId || previous.destination !== canonical) {
+            throw new DestinationRecoveryError("Journal does not own the retained destination lock");
+        }
+        const sameRecoveryProcess = previous.recovering === true && previous.pid === self.pid && previous.uid === self.uid && previous.bootId === self.bootId && previous.startTime === self.startTime;
+        if (!sameRecoveryProcess && !await processHasStopped(previous)) throw new DestinationBusyError("Destination owner is still running; recovery refused");
+    }
+    const writeOwner = async (operationId?: string) => {
+        await storage.assertAvailable(ownerPath);
+        const owner = { token, destination: canonical, ...self, operationId, recovering: !!recovery };
+        const temporary = path.join(locks, `.owner-${randomUUID()}.tmp`);
+        const handle = await fs.open(temporary, "wx", 0o600);
+        try { await handle.writeFile(JSON.stringify(owner)); await handle.sync(); } finally { await handle.close(); }
+        await storage.assertAvailable(ownerPath);
+        await fs.rename(temporary, ownerPath);
+        const parent = await fs.open(directory, "r");
+        try { await parent.sync(); } finally { await parent.close(); }
+        const container = await fs.open(locks, "r");
+        try { await container.sync(); } finally { await container.close(); }
+    };
+    if (recovery) await writeOwner(recovery.operationId);
+    else await fs.writeFile(ownerPath, JSON.stringify({ token, destination: canonical, ...self }), { flag: "wx", mode: 0o600 });
     let released = false;
     const initial = await fingerprint(canonical);
     const lock: DestinationLock = {
         destination: canonical,
         directory,
-        unresolved: false,
+        unresolved: !!recovery,
+        token,
+        async bindOperation(operationId) { await this.assertOwned(); await writeOwner(operationId); },
         markUnresolved() { this.unresolved = true; },
         markSafe() { this.unresolved = false; },
         assertStorage: target => storage.assertAvailable(target),

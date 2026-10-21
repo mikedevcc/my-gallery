@@ -1,3 +1,4 @@
+import type { ReplacementEvidence } from "./replacement-files";
 import type { ReplacementReceipt } from "./replacement-recovery";
 import type { ImportedMedia } from "./media-import";
 import { Pool, PoolClient } from "pg";
@@ -397,7 +398,10 @@ export async function updateImportedMedia(
 
     try {
         await client.query("BEGIN");
-        if (replacement) await client.query("SET LOCAL synchronous_commit = on");
+        if (replacement) {
+            await client.query("SET LOCAL synchronous_commit = on");
+            await lockReplacementTransaction(client, replacement.receipt.operationId);
+        }
 
         let cityId: number | undefined;
 
@@ -1340,3 +1344,34 @@ export async function getReplacementReceipt(operationId: string): Promise<Replac
         return result.rows[0];
     } finally { client.release(); }
 }
+
+async function lockReplacementTransaction(client: PoolClient, operationId: string) {
+    const result = await client.query("SELECT pg_try_advisory_xact_lock(hashtextextended($1, 48291)) AS locked", [operationId]);
+    if (!result.rows[0]?.locked) throw new Error("Replacement database operation is still running or recovery is active");
+}
+
+// A fresh READ COMMITTED snapshot AFTER the advisory lock is acquired makes
+// absence conclusive. The original transaction must have released the same lock.
+export async function withReplacementRecoveryDatabase<T>(operationId: string, mediaId: number,
+    action: (evidence: ReplacementEvidence) => Promise<T>): Promise<T> {
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN ISOLATION LEVEL READ COMMITTED READ ONLY");
+        await lockReplacementTransaction(client, operationId);
+        const receipt = await client.query<ReplacementReceipt>(
+            `SELECT operation_id::text AS "operationId", media_id AS "mediaId", target_path AS target,
+                    original_sha256 AS "originalSha256", incoming_sha256 AS "incomingSha256"
+             FROM public.media_replacement_receipts WHERE operation_id=$1`, [operationId]);
+        const media = await client.query<{ path: string }>("SELECT path FROM public.media WHERE media_id=$1", [mediaId]);
+        const result = await action({ receipt: receipt.rows[0], mediaPath: media.rows[0]?.path });
+        await client.query("COMMIT");
+        return result;
+    } catch (error) {
+        try { await client.query("ROLLBACK"); }
+        catch (rollbackError) { throw new AggregateError([error, rollbackError], "Recovery transaction close failed"); }
+        throw error;
+    } finally { client.release(); }
+}
+
+// Maintenance CLI shutdown; request handlers keep their shared pool alive.
+export async function closeMediaDatabase(): Promise<void> { await pool.end(); }

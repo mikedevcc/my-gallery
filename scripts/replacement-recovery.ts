@@ -12,10 +12,13 @@ export type ReplacementReceipt = {
     originalSha256: string;
     incomingSha256: string;
 };
-export type RecoveryState = "PREPARED" | "FILES_PUBLISHED" | "COMMIT_PENDING" | "COMMIT_UNKNOWN" | "COMMITTED" | "COMPLETE";
+export type RecoveryState = "PREPARED" | "FILES_PUBLISHED" | "COMMIT_PENDING" | "COMMIT_UNKNOWN" | "COMMITTED" | "COMPLETE" | "ROLLED_BACK";
 export type FileIdentity = { sha256: string; size: string; device: string; inode: string };
 export type ReplacementJournal = {
     version: 1;
+    protocol?: 2;
+    lockToken?: string;
+    publicationPath?: string;
     operationId: string;
     installationId: string;
     filesystemUuid: string;
@@ -29,7 +32,7 @@ export type ReplacementJournal = {
     state: RecoveryState;
 };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const states: RecoveryState[] = ["PREPARED", "FILES_PUBLISHED", "COMMIT_PENDING", "COMMIT_UNKNOWN", "COMMITTED", "COMPLETE"];
+const states: RecoveryState[] = ["PREPARED", "FILES_PUBLISHED", "COMMIT_PENDING", "COMMIT_UNKNOWN", "COMMITTED", "COMPLETE", "ROLLED_BACK"];
 const journalDirectory = ".replacement-operations";
 
 // Fail closed if the filesystem does not support directory/file synchronization.
@@ -104,15 +107,19 @@ export async function prepareReplacementJournal(root: string, mediaId: number, s
     const operationId = randomUUID();
     const original = await identifyReplacementFile(root, lock.destination);
     const incoming = await identifyReplacementFile(root, stagedPath);
+    if (original.device === incoming.device && original.inode === incoming.inode) throw new Error("Incoming media aliases the original inode");
     await lock.revalidate();
     const journal: ReplacementJournal = {
-        version: 1, operationId, mediaId, target: lock.destination, stagedPath,
+        version: 1, protocol: 2, lockToken: lock.token,
+        publicationPath: `${lock.destination}.publish-${operationId}`,
+        operationId, mediaId, target: lock.destination, stagedPath,
         backupPath: `${lock.destination}.backup-${operationId}`, lockDirectory: lock.directory,
         installationId: process.env.MEDIA_STORAGE_ID!, filesystemUuid: process.env.MEDIA_STORAGE_UUID!,
         original, incoming, state: "PREPARED",
     };
     // Once persistence starts, a failed fsync is an unresolved operation too.
     lock.markUnresolved();
+    await lock.bindOperation(operationId);
     await syncReplacementPath(root, lock.destination);
     await syncReplacementPath(root, stagedPath);
     await syncParents(root, stagedPath);

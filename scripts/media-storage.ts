@@ -11,13 +11,6 @@ import { withDestinationLock, type DestinationLock } from "./destination-lock";
 import { createStorageDirectory, getMediaStorageRoot, validateStorage } from "./storage-safety";
 
 
-export type ReplacementState = {
-    stagedPath: string;
-    destinationPath: string;
-    backupPath: string;
-};
-
-
 export { getMediaStorageRoot } from "./storage-safety";
 
 
@@ -271,85 +264,6 @@ export async function findStagedConflictFile(
     return path.join(
         conflictDirectory,
         files[0].name
-    );
-}
-
-
-export async function beginMediaReplacement(
-    stagedPath: string,
-    destinationPath: string,
-    lock: DestinationLock,
-    backupPath = `${destinationPath}.backup-${randomUUID()}`,
-): Promise<ReplacementState> {
-    await lock.assertOwned(destinationPath);
-    await lock.revalidate();
-    await lock.assertStorage(stagedPath);
-    
-    lock.markUnresolved();
-    // move existing destination to backup
-    await fs.rename(
-        destinationPath,
-        backupPath
-    );
-
-    try {
-        // link staged file into destination
-        await lock.assertOwned();
-        await lock.assertStorage(stagedPath);
-        await fs.link(stagedPath, destinationPath);
-
-        return {
-            stagedPath,
-            destinationPath,
-            backupPath
-        }
-    }
-    catch (error) {
-        try {
-            await lock.assertOwned();
-            await lock.assertStorage(backupPath);
-            await fs.rename(
-                backupPath,
-                destinationPath
-            );
-        }
-        catch (restoreError) {
-            console.error(
-                "Failed to restore original media after replacement failure:",
-                restoreError
-            );
-        }
-
-        throw error;
-    }
-}
-
-
-export async function commitMediaReplacement(
-    replacement: ReplacementState,
-    lock: DestinationLock,
-): Promise<void> {
-    await lock.assertOwned(replacement.destinationPath);
-    await lock.assertStorage(replacement.stagedPath);
-    await fs.unlink(replacement.stagedPath);
-    await lock.assertOwned();
-    await lock.assertStorage(replacement.backupPath);
-    await fs.rm(replacement.backupPath, { force: true });
-}
-
-
-export async function rollbackMediaReplacement(
-    replacement: ReplacementState,
-    lock: DestinationLock,
-): Promise<void> {
-    await lock.assertOwned(replacement.destinationPath);
-    await fs.rm(replacement.destinationPath, { force: true });
-
-    await lock.assertOwned();
-    await lock.assertStorage(replacement.backupPath);
-    await fs.rename(
-        replacement.backupPath,
-        replacement.destinationPath
     );
 }
 

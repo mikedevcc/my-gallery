@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
-import path from "node:path";
-import { prepareReplacementJournal, receiptFor, writeReplacementJournal, syncReplacementPath, type ReplacementReceipt } from "./replacement-recovery";
+import { publishReplacement, reconcileReplacement, type RecoveryDatabase } from "./replacement-files";
+import { prepareReplacementJournal, receiptFor, writeReplacementJournal, type ReplacementReceipt } from "./replacement-recovery";
 import { withDestinationLock } from "./destination-lock";
-import { beginMediaReplacement, commitMediaReplacement, deleteStoredMedia } from "./media-storage";
+import { deleteStoredMedia } from "./media-storage";
 
 // Callbacks keep PostgreSQL work inside the same destination ownership interval.
 export async function replaceMediaAtDestination(options: {
@@ -10,6 +10,7 @@ export async function replaceMediaAtDestination(options: {
     destination: string;
     stagedPath: string;
     mediaId: number;
+    withRecoveryDatabase?: RecoveryDatabase;
     readReceipt: (operationId: string) => Promise<ReplacementReceipt | undefined>;
     revalidateMetadata: () => Promise<void>;
     updateMetadata: (receipt: ReplacementReceipt, assertStorage: () => Promise<void>) => Promise<void>;
@@ -22,34 +23,38 @@ export async function replaceMediaAtDestination(options: {
         const journal = await prepareReplacementJournal(options.root, options.mediaId, options.stagedPath, lock);
         // Fail before publication if 0002 is absent or the operation ID already exists.
         if (await options.readReceipt(journal.operationId)) throw new Error("Replacement receipt already exists");
-        const state = await beginMediaReplacement(options.stagedPath, lock.destination, lock, journal.backupPath);
-        await syncReplacementPath(options.root, path.dirname(lock.destination));
-        journal.state = "FILES_PUBLISHED";
-        await writeReplacementJournal(options.root, journal, lock);
-        journal.state = "COMMIT_PENDING";
-        await writeReplacementJournal(options.root, journal, lock);
         try {
-            await lock.assertOwned();
-            await options.updateMetadata(receiptFor(journal), () => lock.assertOwned());
-        } catch (error) {
-            // Never roll files back after a potentially committed transaction.
-            // Preserve both generations, staging, journal and lock for inspection.
-            journal.state = "COMMIT_UNKNOWN";
+            await publishReplacement(options.root, journal, lock);
+            journal.state = "FILES_PUBLISHED";
+            await writeReplacementJournal(options.root, journal, lock);
+            journal.state = "COMMIT_PENDING";
+            await writeReplacementJournal(options.root, journal, lock);
             try {
-                await writeReplacementJournal(options.root, journal, lock);
-            } catch (journalError) {
-                throw new AggregateError([error, journalError], "Metadata outcome and recovery journal update are unresolved");
+                await lock.assertOwned();
+                await options.updateMetadata(receiptFor(journal), () => lock.assertOwned());
+            } catch (error) {
+                journal.state = "COMMIT_UNKNOWN";
+                try { await writeReplacementJournal(options.root, journal, lock); }
+                catch (journalError) { throw new AggregateError([error, journalError], "Metadata outcome and recovery journal update are unresolved"); }
+                throw error;
+            }
+            journal.state = "COMMITTED";
+            await writeReplacementJournal(options.root, journal, lock);
+            // Receipt acknowledged by the transaction callback. Reconciliation
+            // verifies identities before deleting any evidence and invalidates cache.
+            await reconcileReplacement(options.root, journal, lock, { receipt: receiptFor(journal), mediaPath: journal.target });
+        } catch (error) {
+            if (options.withRecoveryDatabase) {
+                try {
+                    const outcome = await options.withRecoveryDatabase(journal.operationId, journal.mediaId,
+                        evidence => reconcileReplacement(options.root, journal, lock, evidence));
+                    if (outcome === "COMMITTED") return;
+                } catch (recoveryError) {
+                    throw new AggregateError([error, recoveryError], "Replacement remains unresolved; destination lock retained");
+                }
             }
             throw error;
         }
-        journal.state = "COMMITTED";
-        await writeReplacementJournal(options.root, journal, lock);
-        await lock.assertOwned();
-        await commitMediaReplacement(state, lock);
-        await syncReplacementPath(options.root, path.dirname(state.stagedPath));
-        await syncReplacementPath(options.root, path.dirname(state.destinationPath));
-        journal.state = "COMPLETE";
-        await writeReplacementJournal(options.root, journal, lock);
         lock.markSafe();
     });
 }

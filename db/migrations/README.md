@@ -257,4 +257,4 @@ your deployment role policy. Review and apply this forward migration before
 replacement traffic; creating this file does not apply it. No database was used
 for H4-B validation: SQL discovery/safety checks and mocked transaction tests are
 offline only. See [the recovery protocol](../../docs/replacement-recovery.md)
-for durability assumptions, backups and remaining H4-C work.
+for H4-C atomic publication, guarded recovery, durability assumptions and backups.

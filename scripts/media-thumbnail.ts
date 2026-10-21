@@ -1,3 +1,4 @@
+import { withDestinationLock } from "./destination-lock";
 import path from "node:path";
 import fs from "node:fs/promises";
 import sharp from "sharp";
@@ -15,7 +16,7 @@ import {
 const execFileAsync = promisify(execFile);
 
 
-export async function getOrCreateThumbnail(
+async function createThumbnailLocked(
     mediaId: number,
     mediaPath: string,
     fileType: "IMAGE" | "VIDEO"
@@ -95,4 +96,10 @@ export async function deleteThumbnail(
 
         throw error;
     }
+}
+
+// Serialize cache generation with replacement/deletion so an old generator
+// cannot republish stale bytes after replacement invalidates the cache.
+export async function getOrCreateThumbnail(mediaId: number, mediaPath: string, fileType: "IMAGE" | "VIDEO"): Promise<string> {
+    return withDestinationLock(getMediaStorageRoot(), mediaPath, async () => createThumbnailLocked(mediaId, mediaPath, fileType));
 }

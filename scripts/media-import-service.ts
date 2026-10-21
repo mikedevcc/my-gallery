@@ -14,6 +14,7 @@ import {
     findMediaByPath,
     updateImportedMedia,
     getReplacementReceipt,
+    withReplacementRecoveryDatabase,
 } from "./media-database";
 import { 
     buildDestinationPath, 
@@ -257,7 +258,7 @@ async function applyStagedConflictResolution(
         };
 
         await replaceMediaAtDestination({
-            mediaId, readReceipt: getReplacementReceipt,
+            mediaId, readReceipt: getReplacementReceipt, withRecoveryDatabase: withReplacementRecoveryDatabase,
             root: getMediaStorageRoot(),
             destination,
             stagedPath,

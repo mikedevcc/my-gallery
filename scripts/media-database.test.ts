@@ -53,6 +53,8 @@ async function withPool<T>(options: Options, operation: (state: {
                 if (queries.length === options.failQuery) throw error;
                 const response = options.response?.(sql);
                 if (response) return response;
+                if (sql.includes("pg_try_advisory_xact_lock")) return { rows: [{ locked: true }], rowCount: 1 };
+                if (sql.includes("FROM public.media_replacement_receipts")) return { rows: [], rowCount: 0 };
                 if (sql.startsWith("SELECT media_id FROM media WHERE path")) return { rows: [], rowCount: 0 };
                 return { rows: [{ media_id: 1, trip_id: 1, album_id: 1, country_id: 1, city_id: 1 }], rowCount: 1 };
             },
@@ -67,7 +69,8 @@ async function withPool<T>(options: Options, operation: (state: {
     }
 }
 
-const operations: Record<keyof typeof database, () => Promise<unknown>> = {
+const operations: Record<Exclude<keyof typeof database, "closeMediaDatabase">, () => Promise<unknown>> = {
+    withReplacementRecoveryDatabase: () => database.withReplacementRecoveryDatabase("12345678-1234-4234-8234-123456789abc", 1, async value => value),
     getReplacementReceipt: () => database.getReplacementReceipt("12345678-1234-4234-8234-123456789abc"),
     findMediaByPath: () => database.findMediaByPath("/test/test.jpg"),
     insertImportedMedia: () => database.insertImportedMedia(image),
@@ -184,16 +187,17 @@ test("replacement receipt and metadata use the same transaction and guarded dura
         assert.equal(guarded, true);
         assert.equal(queries[0], "BEGIN");
         assert.equal(queries[1], "SET LOCAL synchronous_commit = on");
-        assert.match(queries[2], /UPDATE media/);
-        assert.match(queries[3], /UPDATE image/);
-        assert.match(queries[4], /INSERT INTO public.media_replacement_receipts/);
-        assert.equal(queries[5], "COMMIT");
-        assert.deepEqual(parameters[4], [receipt.operationId, receipt.mediaId, receipt.target, receipt.originalSha256, receipt.incomingSha256]);
+        assert.match(queries[2], /pg_try_advisory_xact_lock/);
+        assert.match(queries[3], /UPDATE media/);
+        assert.match(queries[4], /UPDATE image/);
+        assert.match(queries[5], /INSERT INTO public.media_replacement_receipts/);
+        assert.equal(queries[6], "COMMIT");
+        assert.deepEqual(parameters[5], [receipt.operationId, receipt.mediaId, receipt.target, receipt.originalSha256, receipt.incomingSha256]);
     });
 });
 
 test("receipt insert, metadata, guard, and COMMIT failures roll back and release", async () => {
-    for (const failQuery of [3, 4, 5, 6]) {
+    for (const failQuery of [3, 4, 5, 6, 7]) {
         await withPool({ failQuery }, async ({ queries }) => {
             await assert.rejects(database.updateImportedMedia(1, image, undefined, undefined, { receipt, assertStorage: async () => {} }));
             assert.equal(queries.at(-1), "ROLLBACK");

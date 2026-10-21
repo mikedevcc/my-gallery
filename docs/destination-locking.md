@@ -23,7 +23,8 @@ The shared filesystem must implement atomic mkdir/link/rename consistently.
 Participating writers:
 
 - Replacement holds ownership through target/metadata revalidation, backup,
-  publication, database update, rollback when attempted, and backup cleanup.
+  atomic publication, database update, guarded rollback, thumbnail invalidation,
+  and backup cleanup.
 - Deletion acquires ownership before database deletion, rechecks the stored path,
   and holds ownership through original/thumbnail removal.
 - Import finalization locks each candidate (including nonexistent candidates and
@@ -36,18 +37,18 @@ Participating writers:
   conflicts without saved destination metadata must be recovered/listed first.
 
 Staging uploads and conflict metadata retain job/conflict coordination. Thumbnail
-generation writes a separate cache and does not acquire original-destination
-locks; generation/invalidation races remain separate work. Read/preview routes
-also do not lock, so temporary publication gaps and transient metadata/byte
-differences remain possible during the existing replacement sequence.
+generation now acquires the original destination lock to serialize with replacement
+invalidation. Read/preview routes do not lock. H4-C publishes via atomic rename
+without a missing-target gap; transient metadata/byte differences remain possible
+between publication and the PostgreSQL commit.
 
 A successful operation releases its lock. Preflight errors before mutation also
 release it. Once a filesystem/database mutation might have started, failures retain
 the lock unless the caller explicitly establishes a safe completion. In particular,
-a replacement database error retains both generations and staging because the
-PostgreSQL commit acknowledgement might have been lost. H4-B adds a durable
-[replacement journal and transactional receipt](replacement-recovery.md); read-only
-inspection provides evidence but does not repair files or release locks.
+H4-C uses the [replacement journal and transactional receipt](replacement-recovery.md)
+under an operation-level PostgreSQL lock to reconcile failures safely. Confirmed
+commit completes cleanup; definite rollback restores the original; ambiguity
+retains the destination lock.
 Deletion failures can likewise leave committed database deletion and remaining
 files. Do not interpret a retained lock as proof that either generation committed.
 
@@ -59,13 +60,12 @@ database evidence. Do not manually remove staged conflicts before
 reviewing an unresolved operation. Compare database metadata and actual files;
 resolve the outcome explicitly. Remove an abandoned lock only after confirming
 there is no live owner and consistency/recovery is complete. Neither age nor PID
-absence alone establishes that it is safe to clear. No automatic recovery or
-lock-removal command is supplied.
+absence alone establishes that it is safe to clear. An explicit guarded H4-C recovery command is supplied; it never force-removes
+a lock based on age.
 
 Process death retains the destination lock. H4-B syncs replacement evidence and
-uses receipts to identify committed metadata. Automatic crash reconciliation,
-thumbnail invalidation, and binding an old conflict to the exact generation the
-user previewed remain later H4 work. H4-B introduces migration 0002; the applied
+uses receipts to identify committed metadata. H4-C adds explicit crash reconciliation and thumbnail invalidation. Binding an old
+conflict to the exact generation the user previewed remains later work. H4-B introduces migration 0002; the applied
 0001 baseline remains unchanged.
 
 ## Offline regression tests
