@@ -88,7 +88,8 @@ unlink and lock-directory removal requires manual investigation; do not remove a
 lock based on age. No metadata reconstruction, automatic recovery, reset, receipt
 GC or physical file restoration after a committed deletion is provided. Recovery
 honors committed deletion intent, so removed original bytes require backups to
-restore. N1 conflict-marker reconciliation remains separate replacement work.
+restore. Staged conflict-marker reconciliation is documented in
+[replacement recovery](replacement-recovery.md).
 
 Requires local Linux ext4/XFS and working file/directory fsync, PostgreSQL durable
 WAL settings, hardware flushes and cooperating destination-locked writers.

@@ -1,3 +1,4 @@
+import { acquireResolutionClaim, finishOwnedConflict, releaseUnboundResolutionClaim, type ResolutionClaim } from "./conflict-resolution-lock";
 import { validateStorage } from "./storage-safety";
 import { savePendingConflict } from "./pending-import-conflicts";
 import { DestinationBusyError, DestinationRecoveryError } from "./destination-lock";
@@ -56,9 +57,14 @@ type ConflictResolutionResult =
     };
 
 
-async function cleanupStagedJob(stagedPath: string): Promise<void> {
+async function cleanupStagedJob(stagedPath: string, claim?: ResolutionClaim): Promise<void> {
+    if (claim) { await finishOwnedConflict(getMediaStorageRoot(), claim); return; }
     const storage = await validateStorage();
     await storage.assertAvailable(stagedPath);
+    const marker = path.join(path.dirname(stagedPath), ".resolution-lock");
+    await storage.assertAvailable(marker);
+    try { await fs.lstat(marker); throw new DestinationRecoveryError("Conflict marker requires ownership-aware cleanup"); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     try {
         await fs.rm(path.dirname(stagedPath), {
             recursive: true,
@@ -80,6 +86,7 @@ async function finalizeImportedMedia(
     imported: ImportedMedia,
     location: ResolvedLocation,
     keepBoth = false,
+    claim?: ResolutionClaim,
 ): Promise<number> {
     let mediaId: number | undefined;
     await finalizeStagedMedia(stagedPath, destination, async finalPath => {
@@ -93,7 +100,7 @@ async function finalizeImportedMedia(
         }, location.country, location.city);
     });
     if (mediaId === undefined) throw new Error("Finalization did not return a media ID");
-    await cleanupStagedJob(stagedPath);
+    await cleanupStagedJob(stagedPath, claim);
     return mediaId;
 }
 
@@ -183,10 +190,11 @@ export async function importMediaToLibrary(
 
 async function applyStagedConflictResolution(
     conflictId: string,
-    action: ConflictAction
+    action: ConflictAction,
+    claim: ResolutionClaim,
 ): Promise<ConflictResolutionResult> {
     if (action === "SKIP") {
-        await removeStagedConflict(conflictId);
+        await removeStagedConflict(conflictId, getMediaStorageRoot(), claim);
 
         return {
             type: "SKIPPED",
@@ -209,7 +217,8 @@ async function applyStagedConflictResolution(
 
             const destination = buildDestinationPath(imported, location.city);
 
-            const media_id = await finalizeImportedMedia(stagedPath, destination, imported, location, true);
+            claim.retain = true;
+            const media_id = await finalizeImportedMedia(stagedPath, destination, imported, location, true, claim);
 
             return {
                 type: "COMPLETED",
@@ -217,8 +226,7 @@ async function applyStagedConflictResolution(
             };
         }
         catch (error) {
-            if (!mustPreserveStaging(error)) await cleanupStagedJob(stagedPath);
-
+            // Preserve the owned conflict on failure; no recursive cleanup.
             throw error;
         }
     }
@@ -262,14 +270,14 @@ async function applyStagedConflictResolution(
             root: getMediaStorageRoot(),
             destination,
             stagedPath,
+            conflict: claim,
             revalidateMetadata: async () => {
                 const current = await findMediaByPath(destination);
                 if (current?.media_id !== mediaId) throw new Error("Replacement target changed; review the conflict again");
             },
             updateMetadata: (receipt, assertStorage) => updateImportedMedia(mediaId, storedImported, location.country, location.city, { receipt, assertStorage }),
         });
-        await cleanupStagedJob(stagedPath);
-
+        // Replacement reconciliation already finalized the owned conflict.
         return {
             type: "COMPLETED",
             mediaId,
@@ -286,21 +294,11 @@ export async function resolveStagedConflict(
     action: ConflictAction
 ): Promise<ConflictResolutionResult> {
     const stagedPath = await findStagedConflictFile(conflictId);
-    const lockPath = path.join(path.dirname(stagedPath), ".resolution-lock");
-    const storage = await validateStorage();
-    await storage.assertAvailable(lockPath);
+    const root = getMediaStorageRoot();
+    const claim = await acquireResolutionClaim(root, conflictId, action, stagedPath);
     try {
-        await fs.mkdir(lockPath);
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-            throw new Error("This file is already being resolved.");
-        }
-        throw error;
-    }
-    try {
-        return await applyStagedConflictResolution(conflictId, action);
+        return await applyStagedConflictResolution(conflictId, action, claim);
     } finally {
-        await storage.assertAvailable(lockPath);
-        await fs.rm(lockPath, { recursive: true, force: true });
+        await releaseUnboundResolutionClaim(root, claim);
     }
 }

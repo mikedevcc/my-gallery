@@ -1,3 +1,4 @@
+import { finalizeReplacementConflict, verifyReplacementConflict } from "./conflict-resolution-lock";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { acquireDestinationLock, DestinationBusyError, type DestinationLock } from "./destination-lock";
@@ -49,6 +50,7 @@ export async function removeVerified(root: string, target: string, expected: Fil
 
 export async function publishReplacement(root: string, journal: ReplacementJournal, lock: DestinationLock) {
     protocol(journal);
+    await verifyReplacementConflict(root, journal, false);
     await lock.assertOwned(journal.target);
     await lock.revalidate();
     await requireIdentity(root, journal.target, journal.original);
@@ -93,6 +95,7 @@ export async function reconcileReplacement(root: string, journal: ReplacementJou
         throw new Error("Conflicting replacement receipt; manual investigation required");
     }
     if (!evidence.receipt && ["COMMITTED", "COMPLETE"].includes(journal.state)) throw new Error("Durable commit evidence disagrees with database; manual investigation required");
+    await verifyReplacementConflict(root, journal, !!evidence.receipt);
     const target = await observed(root, journal.target);
     const backup = await observed(root, journal.backupPath);
     // Validate ALL surviving evidence before the first recovery mutation.
@@ -125,6 +128,7 @@ export async function reconcileReplacement(root: string, journal: ReplacementJou
         journal.state = "ROLLED_BACK"; // Incoming staging is retained for an explicit retry.
     }
     await writeReplacementJournal(root, journal, lock);
+    await finalizeReplacementConflict(root, journal, lock, !!evidence.receipt);
     lock.markSafe();
     return evidence.receipt ? "COMMITTED" : "ROLLED_BACK";
 }
@@ -151,7 +155,11 @@ async function recoverStoppedReplacement(root: string, operationId: string, data
         try { await fs.lstat(journal.lockDirectory); }
         catch (error) {
             if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-            if (["COMPLETE", "ROLLED_BACK"].includes(journal.state)) return "ALREADY_COMPLETE";
+            if (["COMPLETE", "ROLLED_BACK"].includes(journal.state)) {
+                if (journal.conflict && journal.conflict.phase !== "FINALIZED") throw new Error("Unfinished conflict cleanup has no destination lock; manual investigation required");
+                if (!journal.conflict) await verifyReplacementConflict(root, journal, !!evidence.receipt);
+                return "ALREADY_COMPLETE";
+            }
             throw new Error("Nonterminal journal has no destination lock; manual investigation required");
         }
         const lock = await acquireDestinationLock(root, journal.target, { operationId, token: journal.lockToken! });

@@ -156,3 +156,83 @@ kills recovery after restoration. A separate opt-in
 cluster/database; normal invocation skips it. It verifies real SQL rollback,
 transactional receipts, acknowledgement reconciliation and in-flight advisory
 locking. These tests are not physical power-cut or production-volume tests.
+
+## Staged conflict marker reconciliation (N1)
+
+New conflict resolutions create `.incoming/<conflictId>/.resolution-lock` with
+an immutable, atomically published and fsynced `owner.json` (0600). It records an
+operation UUID, random ownership token, action, installation/filesystem identity,
+PID/UID/boot/start-time identity, recorded target and staged path, file identities
+and job/marker directory identities. An exclusive mkdir excludes other requests
+and Node processes. No marker is removed or stolen because it is old.
+
+Before replacement publication, the destination journal binds the operation UUID,
+conflict ID, marker token, owner-file identity, metadata-file identity and directory
+identities. The recorded conflict target and existing media ID, when present, must
+match the replacement. The existing PostgreSQL replacement receipt remains the
+commit authority; N1 adds no schema or migration.
+
+Replacement recovery now validates surviving conflict evidence before changing
+media files, then retains the destination lock until conflict cleanup is durable:
+
+- Confirmed commit: retain only the committed incoming destination, clean matching
+  replacement evidence, remove verified conflict metadata and marker, and remove
+  the job directory only when empty. A missing staged file is supported; recovery
+  uses the journal directly and does not call findStagedConflictFile.
+- Definitely rolled back: restore the original through H4's guarded rollback,
+  preserve incoming staging and conflict metadata, and remove only the matching
+  marker so the user can retry. Missing staging on rollback requires investigation.
+- Ambiguous receipt/transaction, live owner, changed file/directory/token, symlink,
+  unknown directory entry or unavailable storage: retain all surviving evidence
+  and locks. An error no longer triggers an unconditional wrapper marker removal.
+
+The journal's optional conflict phase advances through BOUND, CLEANUP_PENDING,
+MARKER_REMOVAL_PENDING and FINALIZED, with the confirmed outcome recorded before
+artifact removal. Only durable MARKER_REMOVAL_PENDING (or FINALIZED) permits a
+retry to accept an already-missing owner file/marker. Directory identities and
+empty-directory checks remain mandatory. Media state COMPLETE or ROLLED_BACK
+alone does not release ownership while conflict cleanup remains unfinished.
+Repeated recovery can finish interrupted metadata unlink, owner unlink, marker
+rmdir or job rmdir. A terminal operation with no retained destination lock is a
+no-op; it never removes a later resolver's marker.
+
+### Maintenance procedure
+
+Stop/drain application writers, use the same Unix account/PID namespace, verify
+the original primary database and expected HDD, and preserve coordinated backups.
+Set MEDIA_RECOVERY_DATABASE_URL and the three MEDIA_STORAGE_* settings explicitly
+(the maintenance CLI never loads .env). Use the operation UUID from owner.json or
+the destination journal, then run the existing command with verified target flags:
+
+```sh
+node --import tsx scripts/recover-media.ts OPERATION_UUID \
+  --kind replacement --host HOST --port PORT --database DATABASE_NAME \
+  --confirm-installation "$MEDIA_STORAGE_ID"
+```
+
+After COMMITTED, verified job artifacts are gone. After ROLLED_BACK, staging and
+metadata remain and the conflict can be retried. ALREADY_COMPLETE changes nothing.
+There is no startup recovery or force option. Database permissions are unchanged:
+SELECT on replacement receipts/media and access to the operation advisory lock;
+filesystem maintenance needs the service account's existing storage permissions.
+
+Legacy ownerless markers, old journals without conflict bindings and markers left
+before journal handoff remain blocked for manual investigation. Never fabricate
+ownership/receipt evidence or clear markers by age. Stop writers and compare the
+original, staging, metadata, backup, journal and primary receipt history before an
+operator-approved repair. A partial initial owner write, unknown artifact, or
+ownerless destination lock still cannot be safely repaired by this command.
+
+SKIP and KEEP_BOTH now use owned markers and verified nonrecursive cleanup too.
+They have no replacement receipt/journal and do not gain crash recovery here;
+after uncertain side effects their retained markers require manual investigation.
+Ordinary imports and deletion recovery keep their existing protocols. No changes
+to applied migrations 0001–0003 are needed.
+
+N1 tests use temporary filesystem fixtures and mocked PostgreSQL evidence. They
+terminate replacement/recovery workers during commit, file settlement, rollback,
+metadata unlink, owner unlink, marker/job removal and finalization; test live
+cross-process exclusion, missing staging, unknown ownership, legacy markers and
+storage loss; and exercise the resolver wrapper. These are process-crash tests,
+not physical HDD power-loss tests. The local Linux/fsync, original-primary-history
+and cooperating-writer assumptions above still apply.

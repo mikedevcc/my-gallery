@@ -1,3 +1,4 @@
+import { bindReplacementConflict, validateConflictEvidence, type ConflictEvidence, type ResolutionClaim } from "./conflict-resolution-lock";
 import fs from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
@@ -30,6 +31,7 @@ export type ReplacementJournal = {
     original: FileIdentity;
     incoming: FileIdentity;
     state: RecoveryState;
+    conflict?: ConflictEvidence;
 };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const states: RecoveryState[] = ["PREPARED", "FILES_PUBLISHED", "COMMIT_PENDING", "COMMIT_UNKNOWN", "COMMITTED", "COMPLETE", "ROLLED_BACK"];
@@ -109,9 +111,9 @@ export async function writeOperationJournal(root: string, directoryName: string,
     await syncReplacementPath(root, directory);
 }
 
-export async function prepareReplacementJournal(root: string, mediaId: number, stagedPath: string, lock: DestinationLock): Promise<ReplacementJournal> {
+export async function prepareReplacementJournal(root: string, mediaId: number, stagedPath: string, lock: DestinationLock, conflict?: ResolutionClaim): Promise<ReplacementJournal> {
     if (!Number.isSafeInteger(mediaId) || mediaId <= 0) throw new Error("Invalid replacement media ID");
-    const operationId = randomUUID();
+    const operationId = conflict?.operationId ?? randomUUID();
     const original = await identifyReplacementFile(root, lock.destination);
     const incoming = await identifyReplacementFile(root, stagedPath);
     if (original.device === incoming.device && original.inode === incoming.inode) throw new Error("Incoming media aliases the original inode");
@@ -124,6 +126,7 @@ export async function prepareReplacementJournal(root: string, mediaId: number, s
         installationId: process.env.MEDIA_STORAGE_ID!, filesystemUuid: process.env.MEDIA_STORAGE_UUID!,
         original, incoming, state: "PREPARED",
     };
+    if (conflict) await bindReplacementConflict(root, conflict, journal);
     // Once persistence starts, a failed fsync is an unresolved operation too.
     lock.markUnresolved();
     await lock.bindOperation(operationId);
@@ -162,6 +165,7 @@ export async function readReplacementJournal(root: string, operationId: string):
         if (typeof location !== "string" || !path.isAbsolute(location)) throw new Error("Invalid journal path");
         await storage.assertAvailable(location);
     }
+    validateConflictEvidence(storage.root, journal);
     return journal;
 }
 

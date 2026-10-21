@@ -1,3 +1,4 @@
+import { acquireResolutionClaim, finishOwnedConflict, type ResolutionClaim } from "./conflict-resolution-lock";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { createWriteStream } from "node:fs";
@@ -191,6 +192,7 @@ export async function destinationExists(
 export async function removeStagedConflict(
     conflictId: string,
     root = getMediaStorageRoot(),
+    claim?: ResolutionClaim,
 ): Promise<void> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(conflictId)) {
         throw new Error("Invalid conflict ID");
@@ -215,9 +217,17 @@ export async function removeStagedConflict(
         await lock.assertStorage(metadataPath);
         if (await fs.readFile(metadataPath, "utf8") !== metadata) throw new Error("Conflict metadata changed; retry after review");
         await lock.revalidate();
-        lock.markUnresolved();
         await lock.assertStorage(conflictPath);
-        await fs.rm(conflictPath, { recursive: true, force: true });
+        if (claim && (claim.evidence.conflictId !== conflictId || claim.action !== "SKIP" || claim.target !== conflict.existingPath)) throw new Error("Conflict cleanup claim mismatch");
+        let owned = claim;
+        if (!owned) {
+            const entries = await fs.readdir(conflictPath, { withFileTypes: true });
+            const files = entries.filter(entry => entry.isFile() && entry.name !== ".conflict.json");
+            if (files.length !== 1) throw new Error("Cannot claim an ambiguous staged conflict");
+            owned = await acquireResolutionClaim(root, conflictId, "SKIP", path.join(conflictPath, files[0].name));
+        }
+        lock.markUnresolved(); owned.retain = true;
+        await finishOwnedConflict(root, owned);
         lock.markSafe();
     });
 }

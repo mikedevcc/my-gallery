@@ -24,7 +24,7 @@ Participating writers:
 
 - Replacement holds ownership through target/metadata revalidation, backup,
   atomic publication, database update, guarded rollback, thumbnail invalidation,
-  and backup cleanup.
+  backup cleanup and N1 owned conflict-artifact reconciliation.
 - Deletion acquires ownership before database deletion, rechecks the stored path,
   and holds ownership through original/thumbnail removal.
 - Import finalization locks each candidate (including nonexistent candidates and
@@ -35,6 +35,8 @@ Participating writers:
   Uncertain insertion failures preserve the final/staged file names for review.
 - SKIP acquires the recorded destination lock before discarding staging. Legacy
   conflicts without saved destination metadata must be recovered/listed first.
+  New resolution markers carry durable ownership; unknown/ownerless markers are
+  never removed by SKIP. See [N1 recovery](replacement-recovery.md#staged-conflict-marker-reconciliation-n1).
 
 Staging uploads and conflict metadata retain job/conflict coordination. Thumbnail
 generation now acquires the original destination lock to serialize with replacement

@@ -210,7 +210,7 @@ test("SKIP cannot discard staging while its destination is locked", () => fixtur
     const id = "12ec0585-07cb-4e3c-9d84-1ec28cb40a82";
     const directory = path.join(root, ".incoming", id);
     await fs.mkdir(directory, { recursive: true });
-    await fs.writeFile(path.join(directory, ".conflict.json"), JSON.stringify({ type: "FILENAME", existingPath: destination }));
+    await fs.writeFile(path.join(directory, ".conflict.json"), JSON.stringify({ type: "FILENAME", conflictId: id, existingPath: destination }));
     await fs.writeFile(path.join(directory, "incoming.jpg"), "incoming");
     const lock = await acquireDestinationLock(root, destination);
     await assert.rejects(() => removeStagedConflict(id, root), DestinationBusyError);

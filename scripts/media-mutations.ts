@@ -1,3 +1,4 @@
+import type { ResolutionClaim } from "./conflict-resolution-lock";
 import { prepareDeletionJournal, writeDeletionJournal, deletionReceiptFor, assertDeletionIdentity, syncDeletionCleanup, deletionThumbnailPath, type DeletionReceipt } from "./deletion-tracking";
 import fs from "node:fs/promises";
 import { publishReplacement, reconcileReplacement, type RecoveryDatabase } from "./replacement-files";
@@ -12,6 +13,7 @@ export async function replaceMediaAtDestination(options: {
     stagedPath: string;
     mediaId: number;
     withRecoveryDatabase?: RecoveryDatabase;
+    conflict?: ResolutionClaim;
     readReceipt: (operationId: string) => Promise<ReplacementReceipt | undefined>;
     revalidateMetadata: () => Promise<void>;
     updateMetadata: (receipt: ReplacementReceipt, assertStorage: () => Promise<void>) => Promise<void>;
@@ -21,7 +23,7 @@ export async function replaceMediaAtDestination(options: {
         await lock.revalidate();
         // A missing original is not a new-import opportunity for REPLACE.
         await fs.access(lock.destination);
-        const journal = await prepareReplacementJournal(options.root, options.mediaId, options.stagedPath, lock);
+        const journal = await prepareReplacementJournal(options.root, options.mediaId, options.stagedPath, lock, options.conflict);
         // Fail before publication if 0002 is absent or the operation ID already exists.
         if (await options.readReceipt(journal.operationId)) throw new Error("Replacement receipt already exists");
         try {
