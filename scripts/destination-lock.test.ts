@@ -41,11 +41,11 @@ test("separate conflicts replacing one original cannot overlap", () => fixture(a
     const firstStage = await staged(root);
     const secondStage = await staged(root, "second.jpg");
     let updates = 0;
-    const first = replaceMediaAtDestination({ root, destination, stagedPath: firstStage,
+    const first = replaceMediaAtDestination({ mediaId: 1, readReceipt: async () => undefined, root, destination, stagedPath: firstStage,
         revalidateMetadata: async () => {}, updateMetadata: async () => { updates++; entered.open(); await finish.promise; } });
     await entered.promise;
     try {
-        await assert.rejects(() => replaceMediaAtDestination({ root, destination, stagedPath: secondStage,
+        await assert.rejects(() => replaceMediaAtDestination({ mediaId: 1, readReceipt: async () => undefined, root, destination, stagedPath: secondStage,
             revalidateMetadata: async () => {}, updateMetadata: async () => { updates++; } }), DestinationBusyError);
         assert.equal(updates, 1);
         assert.equal(await fs.readFile(secondStage, "utf8"), "incoming");
@@ -57,7 +57,7 @@ test("separate conflicts replacing one original cannot overlap", () => fixture(a
 
 test("replacement excludes deletion before its database delete", () => fixture(async (root, destination) => {
     const entered = gate(); const finish = gate();
-    const first = replaceMediaAtDestination({ root, destination, stagedPath: await staged(root),
+    const first = replaceMediaAtDestination({ mediaId: 1, readReceipt: async () => undefined, root, destination, stagedPath: await staged(root),
         revalidateMetadata: async () => {}, updateMetadata: async () => { entered.open(); await finish.promise; } });
     await entered.promise;
     let deleted = false;
@@ -74,7 +74,7 @@ test("deletion excludes replacement and releases after successful cleanup", () =
         deleteMetadata: async () => { entered.open(); await finish.promise; return true; }, afterDelete: async () => {} });
     await entered.promise;
     try {
-        await assert.rejects(() => replaceMediaAtDestination({ root, destination, stagedPath: unusedStagedPath,
+        await assert.rejects(() => replaceMediaAtDestination({ mediaId: 1, readReceipt: async () => undefined, root, destination, stagedPath: unusedStagedPath,
             revalidateMetadata: async () => {}, updateMetadata: async () => {} }), DestinationBusyError);
     } finally { finish.open(); await deletion; }
     assert.equal(await fs.stat(destination).then(() => true, () => false), false);
@@ -86,12 +86,12 @@ const unusedStagedPath = "/not-a-user-media-path/unused.jpg";
 
 test("different destinations progress while one operation waits", () => fixture(async (root, destination) => {
     const entered = gate(); const finish = gate();
-    const first = replaceMediaAtDestination({ root, destination, stagedPath: await staged(root),
+    const first = replaceMediaAtDestination({ mediaId: 1, readReceipt: async () => undefined, root, destination, stagedPath: await staged(root),
         revalidateMetadata: async () => {}, updateMetadata: async () => { entered.open(); await finish.promise; } });
     await entered.promise;
     try {
         const other = path.join(root, "other.jpg"); await fs.writeFile(other, "other");
-        await replaceMediaAtDestination({ root, destination: other, stagedPath: await staged(root, "other-incoming.jpg"),
+        await replaceMediaAtDestination({ mediaId: 1, readReceipt: async () => undefined, root, destination: other, stagedPath: await staged(root, "other-incoming.jpg"),
             revalidateMetadata: async () => {}, updateMetadata: async () => {} });
         assert.equal(await fs.readFile(other, "utf8"), "incoming");
     } finally { finish.open(); await first; }
@@ -121,11 +121,11 @@ test("safe preflight failures release; unresolved writes and old locks remain bl
     await assert.rejects(() => acquireDestinationLock(root, destination), DestinationBusyError);
 }));
 
-test("replacement database failure restores original but retains an unresolved lock", () => fixture(async (root, destination) => {
+test("replacement database failure preserves both generations and an unresolved lock", () => fixture(async (root, destination) => {
     const incoming = await staged(root);
-    await assert.rejects(() => replaceMediaAtDestination({ root, destination, stagedPath: incoming,
+    await assert.rejects(() => replaceMediaAtDestination({ mediaId: 1, readReceipt: async () => undefined, root, destination, stagedPath: incoming,
         revalidateMetadata: async () => {}, updateMetadata: async () => { throw new Error("commit acknowledgement lost"); } }), DestinationRecoveryError);
-    assert.equal(await fs.readFile(destination, "utf8"), "original");
+    assert.equal(await fs.readFile(destination, "utf8"), "incoming");
     assert.equal(await fs.readFile(incoming, "utf8"), "incoming");
     await assert.rejects(() => acquireDestinationLock(root, destination), DestinationBusyError);
 }));
@@ -145,7 +145,7 @@ test("replacement staging-cleanup failure retains both generations and ownership
         await unlink(file);
     });
     try {
-        await assert.rejects(() => replaceMediaAtDestination({ root, destination, stagedPath: incoming,
+        await assert.rejects(() => replaceMediaAtDestination({ mediaId: 1, readReceipt: async () => undefined, root, destination, stagedPath: incoming,
             revalidateMetadata: async () => {}, updateMetadata: async () => {} }), DestinationRecoveryError);
         assert.equal(await fs.readFile(destination, "utf8"), "incoming");
         const backups = (await fs.readdir(root)).filter(name => name.includes(".backup-"));
@@ -157,7 +157,7 @@ test("replacement staging-cleanup failure retains both generations and ownership
 
 test("destination and metadata are revalidated before mutation", () => fixture(async (root, destination) => {
     let updated = false;
-    await assert.rejects(() => replaceMediaAtDestination({ root, destination, stagedPath: unusedStagedPath,
+    await assert.rejects(() => replaceMediaAtDestination({ mediaId: 1, readReceipt: async () => undefined, root, destination, stagedPath: unusedStagedPath,
         revalidateMetadata: async () => { await fs.writeFile(destination, "external change"); },
         updateMetadata: async () => { updated = true; } }), /Destination changed/);
     assert.equal(updated, false);

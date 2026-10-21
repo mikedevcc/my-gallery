@@ -279,11 +279,11 @@ export async function beginMediaReplacement(
     stagedPath: string,
     destinationPath: string,
     lock: DestinationLock,
+    backupPath = `${destinationPath}.backup-${randomUUID()}`,
 ): Promise<ReplacementState> {
     await lock.assertOwned(destinationPath);
     await lock.revalidate();
     await lock.assertStorage(stagedPath);
-    const backupPath = `${destinationPath}.backup-${randomUUID()}`;
     
     lock.markUnresolved();
     // move existing destination to backup

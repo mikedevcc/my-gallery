@@ -44,9 +44,10 @@ differences remain possible during the existing replacement sequence.
 A successful operation releases its lock. Preflight errors before mutation also
 release it. Once a filesystem/database mutation might have started, failures retain
 the lock unless the caller explicitly establishes a safe completion. In particular,
-a replacement database error still attempts existing filesystem rollback, but the
-lock remains: PostgreSQL commit acknowledgement might have been lost. This is
-deliberately conservative; H4-A has no durable recovery journal or database receipt.
+a replacement database error retains both generations and staging because the
+PostgreSQL commit acknowledgement might have been lost. H4-B adds a durable
+[replacement journal and transactional receipt](replacement-recovery.md); read-only
+inspection provides evidence but does not repair files or release locks.
 Deletion failures can likewise leave committed database deletion and remaining
 files. Do not interpret a retained lock as proof that either generation committed.
 
@@ -61,10 +62,11 @@ there is no live owner and consistency/recovery is complete. Neither age nor PID
 absence alone establishes that it is safe to clear. No automatic recovery or
 lock-removal command is supplied.
 
-Process death retains the destination lock. Power-loss durability, automatic crash
-reconciliation, ambiguous database commits, thumbnail invalidation, and binding
-an old conflict to the exact generation the user previewed remain later H4 work.
-No baseline or migration changes are part of H4-A.
+Process death retains the destination lock. H4-B syncs replacement evidence and
+uses receipts to identify committed metadata. Automatic crash reconciliation,
+thumbnail invalidation, and binding an old conflict to the exact generation the
+user previewed remain later H4 work. H4-B introduces migration 0002; the applied
+0001 baseline remains unchanged.
 
 ## Offline regression tests
 

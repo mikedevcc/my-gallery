@@ -13,6 +13,7 @@ import {
     insertImportedMedia,
     findMediaByPath,
     updateImportedMedia,
+    getReplacementReceipt,
 } from "./media-database";
 import { 
     buildDestinationPath, 
@@ -256,6 +257,7 @@ async function applyStagedConflictResolution(
         };
 
         await replaceMediaAtDestination({
+            mediaId, readReceipt: getReplacementReceipt,
             root: getMediaStorageRoot(),
             destination,
             stagedPath,
@@ -263,7 +265,7 @@ async function applyStagedConflictResolution(
                 const current = await findMediaByPath(destination);
                 if (current?.media_id !== mediaId) throw new Error("Replacement target changed; review the conflict again");
             },
-            updateMetadata: () => updateImportedMedia(mediaId, storedImported, location.country, location.city),
+            updateMetadata: (receipt, assertStorage) => updateImportedMedia(mediaId, storedImported, location.country, location.city, { receipt, assertStorage }),
         });
         await cleanupStagedJob(stagedPath);
 

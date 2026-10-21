@@ -1,3 +1,4 @@
+import type { ReplacementReceipt } from "./replacement-recovery";
 import type { ImportedMedia } from "./media-import";
 import { Pool, PoolClient } from "pg";
 
@@ -371,7 +372,8 @@ export async function updateImportedMedia(
     mediaId: number,
     imported: ImportedMedia,
     countryName?: string,
-    cityName?: string
+    cityName?: string,
+    replacement?: { receipt: ReplacementReceipt; assertStorage: () => Promise<void> }
 ): Promise<void> {
     const {
         fileName,
@@ -388,10 +390,14 @@ export async function updateImportedMedia(
         longitude,
     } = imported.media;
     
+    if (replacement && (replacement.receipt.mediaId !== mediaId || replacement.receipt.target !== absolutePath)) {
+        throw new Error("Replacement receipt does not match metadata");
+    }
     const client = await pool.connect();
 
     try {
         await client.query("BEGIN");
+        if (replacement) await client.query("SET LOCAL synchronous_commit = on");
 
         let cityId: number | undefined;
 
@@ -421,7 +427,7 @@ export async function updateImportedMedia(
             mediaId
         ];
 
-        await client.query(
+        const updated = await client.query(
             `UPDATE media
             SET file_name = $1,
                 file_type = $2,
@@ -436,6 +442,8 @@ export async function updateImportedMedia(
             WHERE media_id = $11`,
             values
         );
+
+        if (replacement && updated.rowCount !== 1) throw new Error("Replacement media no longer exists");
 
         if (imported.file.fileType === "IMAGE") {
             if (!imported.image) {
@@ -493,6 +501,16 @@ export async function updateImportedMedia(
             );
         }
 
+        if (replacement) {
+            const receipt = replacement.receipt;
+            await client.query(
+                `INSERT INTO public.media_replacement_receipts
+                 (operation_id, media_id, target_path, original_sha256, incoming_sha256)
+                 VALUES ($1, $2, $3, $4, $5)`,
+                [receipt.operationId, receipt.mediaId, receipt.target, receipt.originalSha256, receipt.incomingSha256]
+            );
+            await replacement.assertStorage();
+        }
         await client.query("COMMIT");
     }
     catch (error) {
@@ -1309,4 +1327,16 @@ export async function deleteAlbum(
     finally {
         client.release();
     }
+}
+
+// Read the primary database; failures must never be interpreted as a missing receipt.
+export async function getReplacementReceipt(operationId: string): Promise<ReplacementReceipt | undefined> {
+    const client = await pool.connect();
+    try {
+        const result = await client.query<ReplacementReceipt>(
+            `SELECT operation_id::text AS "operationId", media_id AS "mediaId", target_path AS target,
+                    original_sha256 AS "originalSha256", incoming_sha256 AS "incomingSha256"
+             FROM public.media_replacement_receipts WHERE operation_id = $1`, [operationId]);
+        return result.rows[0];
+    } finally { client.release(); }
 }

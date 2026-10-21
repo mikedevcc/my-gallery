@@ -245,3 +245,16 @@ initialization, adoption, and history enforcement) still require separately
 approved disposable-database integration tests. Do not infer runner execution
 validation from the earlier direct-psql baseline test. No database connection or
 database operation is authorized by creating this documentation.
+
+## Replacement receipts (0002)
+
+`0002_replacement_receipts.sql` adds `public.media_replacement_receipts`: operation
+UUID primary key, media ID, target path, original/incoming SHA-256 hashes and
+commit timestamp. There is intentionally no foreign key or cascading deletion;
+receipts must survive media deletion. Existing application tables and 0001 are
+unchanged. Grant the runtime role SELECT/INSERT on this table separately, following
+your deployment role policy. Review and apply this forward migration before
+replacement traffic; creating this file does not apply it. No database was used
+for H4-B validation: SQL discovery/safety checks and mocked transaction tests are
+offline only. See [the recovery protocol](../../docs/replacement-recovery.md)
+for durability assumptions, backups and remaining H4-C work.

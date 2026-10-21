@@ -29,10 +29,12 @@ type Options = {
 async function withPool<T>(options: Options, operation: (state: {
     clients: { releases: number }[];
     queries: string[];
+    parameters: unknown[][];
     error: Error;
 }) => Promise<T>): Promise<T> {
     const clients: { releases: number }[] = [];
     const queries: string[] = [];
+    const parameters: unknown[][] = [];
     const error = new Error("injected query failure");
     let connects = 0;
     const checkout = mock.method(Pool.prototype, "connect", async () => {
@@ -42,10 +44,11 @@ async function withPool<T>(options: Options, operation: (state: {
         const state = { releases: 0 };
         clients.push(state);
         return {
-            query: async (text: string) => {
+            query: async (text: string, values: unknown[] = []) => {
                 assert.equal(state.releases, 0, "Query after release");
                 const sql = text.replace(/\s+/g, " ").trim();
                 queries.push(sql);
+                parameters.push(values);
                 if (sql === "ROLLBACK" && options.failRollback) throw new Error("injected rollback failure");
                 if (queries.length === options.failQuery) throw error;
                 const response = options.response?.(sql);
@@ -57,7 +60,7 @@ async function withPool<T>(options: Options, operation: (state: {
         } as unknown as PoolClient;
     });
     try {
-        return await operation({ clients, queries, error });
+        return await operation({ clients, queries, parameters, error });
     } finally {
         checkout.mock.restore();
         for (const client of clients) assert.equal(client.releases, 1, "Every acquired client must be released exactly once");
@@ -65,6 +68,7 @@ async function withPool<T>(options: Options, operation: (state: {
 }
 
 const operations: Record<keyof typeof database, () => Promise<unknown>> = {
+    getReplacementReceipt: () => database.getReplacementReceipt("12345678-1234-4234-8234-123456789abc"),
     findMediaByPath: () => database.findMediaByPath("/test/test.jpg"),
     insertImportedMedia: () => database.insertImportedMedia(image),
     updateImportedMedia: () => database.updateImportedMedia(1, image),
@@ -163,5 +167,54 @@ test("collection early returns release clients after rollback", async () => {
     await withPool({ response: () => ({ rows: [], rowCount: 0 }) }, async ({ queries }) => {
         assert.deepEqual(await database.moveMediaToTrip([1], 1, 2), [1]);
         assert.equal(queries.at(-1), "ROLLBACK");
+    });
+});
+
+const receipt = {
+    operationId: "12345678-1234-4234-8234-123456789abc", mediaId: 1,
+    target: image.file.absolutePath, originalSha256: "a".repeat(64), incomingSha256: "b".repeat(64),
+};
+
+test("replacement receipt and metadata use the same transaction and guarded durable commit", async () => {
+    await withPool({}, async ({ queries, parameters }) => {
+        let guarded = false;
+        await database.updateImportedMedia(1, image, undefined, undefined, {
+            receipt, assertStorage: async () => { guarded = true; assert.match(queries.at(-1)!, /INSERT INTO public.media_replacement_receipts/); },
+        });
+        assert.equal(guarded, true);
+        assert.equal(queries[0], "BEGIN");
+        assert.equal(queries[1], "SET LOCAL synchronous_commit = on");
+        assert.match(queries[2], /UPDATE media/);
+        assert.match(queries[3], /UPDATE image/);
+        assert.match(queries[4], /INSERT INTO public.media_replacement_receipts/);
+        assert.equal(queries[5], "COMMIT");
+        assert.deepEqual(parameters[4], [receipt.operationId, receipt.mediaId, receipt.target, receipt.originalSha256, receipt.incomingSha256]);
+    });
+});
+
+test("receipt insert, metadata, guard, and COMMIT failures roll back and release", async () => {
+    for (const failQuery of [3, 4, 5, 6]) {
+        await withPool({ failQuery }, async ({ queries }) => {
+            await assert.rejects(database.updateImportedMedia(1, image, undefined, undefined, { receipt, assertStorage: async () => {} }));
+            assert.equal(queries.at(-1), "ROLLBACK");
+        });
+    }
+    await withPool({}, async ({ queries }) => {
+        await assert.rejects(database.updateImportedMedia(1, image, undefined, undefined, {
+            receipt, assertStorage: async () => { throw new Error("storage lost"); },
+        }), /storage lost/);
+        assert.equal(queries.at(-1), "ROLLBACK");
+        assert.ok(!queries.includes("COMMIT"));
+    });
+});
+
+test("no receipt can commit for a missing media row or mismatched target", async () => {
+    await withPool({ response: sql => sql.startsWith("UPDATE media") ? { rows: [], rowCount: 0 } : undefined }, async ({ queries }) => {
+        await assert.rejects(database.updateImportedMedia(1, image, undefined, undefined, { receipt, assertStorage: async () => {} }), /no longer exists/);
+        assert.ok(!queries.some(sql => sql.startsWith("INSERT INTO public.media_replacement_receipts")));
+    });
+    await withPool({}, async ({ clients }) => {
+        await assert.rejects(database.updateImportedMedia(2, image, undefined, undefined, { receipt, assertStorage: async () => {} }), /does not match/);
+        assert.equal(clients.length, 0);
     });
 });
