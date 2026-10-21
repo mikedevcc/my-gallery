@@ -429,6 +429,40 @@ export function Viewer({
         `/api/media/${media.media_id}/thumbnail`;
 
 
+    async function toggleViewerFavorite() {
+        if (!media) {
+            return;
+        }
+
+        const nextFavoriteState = !favorite;
+
+        const response = await fetch(
+            `/api/media/${media.media_id}`,
+            {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    favorite: nextFavoriteState,
+                }),
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error(
+                `Failed to toggle favorite: ${media.media_id}`
+            );
+        }
+
+        setFavorite(nextFavoriteState);
+
+        window.dispatchEvent(
+            new Event('media-library-updated')
+        );
+    }
+
+
     return (
         <div
             className="viewer"
@@ -474,12 +508,9 @@ export function Viewer({
                                     : ''
                             }`}
                             aria-label="Toggle favorite"
-                            onClick={() =>
-                                setFavorite(
-                                    current =>
-                                        !current
-                                )
-                            }
+                            onClick={() => {
+                                void toggleViewerFavorite();
+                            }}
                         >
                             <Icon name="heart"/>
                         </button>
