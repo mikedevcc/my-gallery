@@ -6,8 +6,8 @@ import { importMediaToLibrary } from "../../scripts/media-import-service";
 
 
 async function main(): Promise<void> {
-    const sourcePath =
-        "/home/mikef/Videos/VID_20260923_204043.mp4";
+    const sourcePath = process.argv[2];
+    if (!sourcePath) throw new Error("Usage: test-real-import.ts MEDIA_FILE (imports into configured database and storage)");
 
     const absolutePath = path.resolve(sourcePath);
 

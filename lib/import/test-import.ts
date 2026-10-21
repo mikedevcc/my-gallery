@@ -37,10 +37,8 @@ async function fileFromPath(filePath: string): Promise<File> {
 }
 
 async function main(): Promise<void> {
-    const testPaths = [
-        "/home/mikef/Pictures/IMG_20260922_200308.jpg",
-        "/home/mikef/Videos/VID_20260923_204043.mp4",
-    ];
+    const testPaths = process.argv.slice(2);
+    if (!testPaths.length) throw new Error("Usage: test-import.ts MEDIA_FILE... (imports into configured database and storage)");
 
     const testFiles = await Promise.all(
         testPaths.map(path => fileFromPath(path))

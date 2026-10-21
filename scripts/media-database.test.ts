@@ -4,6 +4,9 @@ import { Pool, type PoolClient } from "pg";
 import * as database from "./media-database";
 import type { ImportedMedia } from "./media-import";
 
+// Explicit inert target; every checkout is mocked below. Never inherit a real URL.
+process.env.DATABASE_URL = "postgresql://offline:offline@database.invalid:5432/gallery_test";
+
 const deletionReceipt = { operationId: "12345678-1234-4234-8234-123456789abc", mediaId: 1, target: "/test/test.jpg", original: { sha256: "a".repeat(64), size: "100", device: "1", inode: "2" } };
 
 const image: ImportedMedia = {

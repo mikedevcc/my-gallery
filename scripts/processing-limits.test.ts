@@ -215,7 +215,7 @@ test("video thumbnail timeout uses the shared child guard and removes its partia
     assert.deepEqual(await fs.readdir(path.join(root, ".thumbnails")), []);
 }));
 
-test("geocoding bounds response bytes and inherits request cancellation without network access", async () => {
+test("geocoding bounds response bytes and inherits request cancellation without network access", () => configuration({ GEOCODER_URL: "http://geocoder.invalid/reverse", GEOCODER_MODE: "required" }, async () => {
     const fetch = mock.method(globalThis, "fetch", async () => new Response("x".repeat(65537)));
     try { await assert.rejects(resolveLocation(0, 0), status(502)); }
     finally { fetch.mock.restore(); }
@@ -229,7 +229,7 @@ test("geocoding bounds response bytes and inherits request cancellation without 
     });
     try { await assert.rejects(withProcessingJob(controller.signal, () => resolveLocation(0, 0))); }
     finally { stalled.mock.restore(); }
-});
+}));
 
 test("upload bytes are not read when the incomplete-marker durability barrier fails", () => fixture(async root => {
     const open = fs.open;

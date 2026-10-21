@@ -1,10 +1,19 @@
-Node.js / npm
-PostgreSQL 17
-PostGIS
-ExifTool
-Nominatim
-osm2pgsql
-Python + venv
-libicu
-ffmpeg
-sharp
+# Server prerequisites
+
+See [production deployment](deployment.md) for configuration, startup checks,
+release order and maintenance environments.
+
+- Debian with one Next.js Node process (Node 24 tested) and npm.
+- PostgreSQL 17, provisioned using reviewed versioned SQL migrations.
+- Local ext4/XFS HDD with administrator-created installation marker and UUID mount;
+  see [storage configuration](storage-configuration.md).
+- ExifTool and FFmpeg available on the service PATH.
+- Sharp installed as a direct npm runtime dependency, including its platform/native
+  packages. No separate Sharp CLI is required.
+- Nominatim-compatible reverse-geocoding service only when enabled. Its own PostGIS,
+  OSM import tools, Python and data storage are managed separately; they are not
+  gallery-schema requirements. The application has no default development URL.
+- PostgreSQL 17 client tools (`pg_dump`, and `psql` for operator procedures) plus
+  a maintenance checkout containing `tsx` for migration/recovery commands.
+
+This list does not provision services, initialize storage, or run migrations.

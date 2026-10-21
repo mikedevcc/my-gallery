@@ -1,10 +1,13 @@
 # My Gallery
 
+For runtime configuration, required services and release procedures, see
+[production deployment](docs/deployment.md) and [.env.example](.env.example).
+
 Before using media storage, follow [Debian storage provisioning and validation](docs/storage-configuration.md).
 `MEDIA_STORAGE_ROOT`, `MEDIA_STORAGE_UUID`, and `MEDIA_STORAGE_ID` are required;
 the application does not create the storage root or installation marker.
 
-A responsive, frontend-only personal photo library prototype built with Next.js App Router, React, TypeScript, and Tailwind CSS.
+A self-hosted personal photo library built with Next.js App Router, React, TypeScript, PostgreSQL, and Tailwind CSS. Some UI sections still use demonstration data.
 
 ## Run
 

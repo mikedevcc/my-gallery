@@ -28,8 +28,9 @@ after configuration changes. Values in bytes use binary MiB/GiB.
 | `MEDIA_MAX_THUMBNAIL_BYTES` | 16777216 (16 MiB) | Exclusive upper bound for completed thumbnails |
 
 Other fixed bounds: one file and one jobId field, jobId at most 1024 bytes;
-conflict JSON at most 4096 bytes within 10 seconds; reverse geocoding within
-10 seconds with at most 64 KiB of response JSON. Multipart headers also have Busboy's bounded header parser. Existing
+conflict JSON at most 4096 bytes within 10 seconds; reverse geocoding defaults to
+10 seconds with at most 64 KiB of response JSON. Its URL, mode and timeout are
+configured as described in [production deployment](deployment.md). Multipart headers also have Busboy's bounded header parser. Existing
 accepted file extensions are unchanged; unsupported extensions return 415.
 Oversized requests/files return 413, malformed input 400, cancellation/upload
 timeouts 408, unavailable capacity 503, insufficient free disk 507, failed tools

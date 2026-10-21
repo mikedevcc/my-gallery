@@ -1,3 +1,4 @@
+import { databaseConnectionString, RuntimeConfigurationError } from "./runtime-config";
 import type { DeletionEvidence } from "./deletion-recovery";
 import type { DeletionReceipt } from "./deletion-tracking";
 import type { ReplacementEvidence } from "./replacement-files";
@@ -118,15 +119,20 @@ export type AlbumRow = {
 }
 
 
-const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-});
+let pool: Pool | undefined;
+let poolUrl: string | undefined;
+function getPool(): Pool {
+    const url = databaseConnectionString();
+    if (pool && poolUrl !== url) throw new RuntimeConfigurationError("DATABASE_URL changed; restart the application before using a different target");
+    if (!pool) { pool = new Pool({ connectionString: url, connectionTimeoutMillis: 5000 }); poolUrl = url; }
+    return pool;
+}
 
 
 export async function findMediaByPath(
     absolutePath:string
 ): Promise<MediaIdRow | undefined> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         const result = await client.query<MediaIdRow>(
@@ -239,7 +245,7 @@ export async function insertImportedMedia(
     }
 
     // The lookup releases its own client before we acquire the transaction client.
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         await client.query("BEGIN");
@@ -396,7 +402,7 @@ export async function updateImportedMedia(
     if (replacement && (replacement.receipt.mediaId !== mediaId || replacement.receipt.target !== absolutePath)) {
         throw new Error("Replacement receipt does not match metadata");
     }
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         await client.query("BEGIN");
@@ -532,7 +538,7 @@ export async function updateImportedMedia(
 export async function createTrip(
     tripName: string
 ): Promise<number> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         const result = await client.query<{ trip_id: number }>(
@@ -551,7 +557,7 @@ export async function createTrip(
 
 
 export async function getTrips(): Promise<TripRow[]> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try{
         const result = await client.query<TripRow>(
@@ -580,7 +586,7 @@ export async function getTrips(): Promise<TripRow[]> {
 export async function getTripById(
     tripId: number
 ): Promise<TripRow | undefined> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         const result = await client.query<TripRow>(
@@ -610,7 +616,7 @@ export async function getTripById(
 export async function getMediaByTripId(
     tripId: number
 ): Promise<TripMediaRow[]> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         const result = await client.query<TripMediaRow>(
@@ -643,7 +649,7 @@ export async function addMediaToTrip(
     mediaId: number,
     tripId: number
 ): Promise<void> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         await client.query(
@@ -663,7 +669,7 @@ export async function removeMediaFromTrip(
     mediaId: number,
     tripId: number
 ): Promise<boolean> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         const result = await client.query(
@@ -685,7 +691,7 @@ export async function removeMediaFromTrip(
 export async function getMediaFileById (
     mediaId: number
 ): Promise<MediaFileRow | undefined> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         const result = await client.query<MediaFileRow>(
@@ -710,7 +716,7 @@ export async function getMediaFileById (
 export async function getMediaDetailsById(
     mediaId: number
 ): Promise<MediaDetailRow | undefined> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
     
     try {
         const result = await client.query<MediaDetailRow>(
@@ -771,7 +777,7 @@ export async function getMediaDetailsById(
 
 
 export async function getAvailableMedia(): Promise<AvailableMediaRow[]> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         const result = await client.query<AvailableMediaRow>(
@@ -802,7 +808,7 @@ export async function moveMediaToTrip(
     sourceTripId: number,
     targetTripId: number
 ): Promise<number[]> {
-    const client = await pool.connect()
+    const client = await getPool().connect()
 
     try {
         await client.query("BEGIN");
@@ -854,7 +860,7 @@ export async function deleteMediaById(
     receipt: DeletionReceipt,
 ): Promise<DeletedMediaRow | undefined> {
     if (receipt.mediaId !== mediaId) throw new Error("Deletion receipt media mismatch");
-    const client = await pool.connect();
+    const client = await getPool().connect();
     try {
         await client.query("BEGIN");
         await client.query("SET LOCAL synchronous_commit = on");
@@ -880,7 +886,7 @@ export async function deleteMediaById(
 
 export async function getLibraryMedia():
     Promise<LibraryMediaRow[]> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         const result = await client.query<LibraryMediaRow>(
@@ -914,7 +920,7 @@ export async function getLibraryMedia():
 
 
 export async function getAlbums(): Promise<AlbumRow[]> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         const result = await client.query<AlbumRow>(`
@@ -945,7 +951,7 @@ export async function getAlbums(): Promise<AlbumRow[]> {
 export async function createAlbum(
     albumName: string
 ): Promise<number> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         const result = await client.query<{ album_id: number }>(
@@ -968,7 +974,7 @@ export async function createAlbum(
 export async function getAlbumById(
     albumId: number
 ): Promise<AlbumRow | undefined> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         const result = await client.query<AlbumRow>(
@@ -992,7 +998,7 @@ export async function getAlbumById(
 export async function getMediaByAlbumId(
     albumId: number
 ): Promise<AlbumMediaRow[]> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         const result = await client.query<AlbumMediaRow>(
@@ -1028,7 +1034,7 @@ export async function addMediaToAlbum(
     mediaId: number,
     albumId: number
 ): Promise<void> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         await client.query('BEGIN');
@@ -1072,7 +1078,7 @@ export async function removeMediaFromAlbum(
     mediaId: number,
     albumId: number
 ): Promise<boolean> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         await client.query('BEGIN');
@@ -1120,7 +1126,7 @@ export async function moveMediaToAlbum(
     sourceAlbumId: number,
     targetAlbumId: number
 ): Promise<void> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         await client.query('BEGIN');
@@ -1199,7 +1205,7 @@ export async function copyMediaToAlbum(
     sourceAlbumId: number,
     targetAlbumId: number
 ): Promise<void> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         await client.query(
@@ -1232,7 +1238,7 @@ export async function setMediaFavorite(
     mediaId: number,
     favorite: boolean
 ): Promise<boolean> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         const result = await client.query(
@@ -1254,7 +1260,7 @@ export async function renameTrip(
     tripId: number,
     tripName: string
 ): Promise<boolean> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         const result = await client.query(
@@ -1275,7 +1281,7 @@ export async function renameTrip(
 export async function deleteTrip(
     tripId: number
 ): Promise<boolean> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         const result = await client.query(
@@ -1296,7 +1302,7 @@ export async function renameAlbum(
     albumId: number,
     albumName: string
 ): Promise<boolean> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         const result = await client.query(
@@ -1317,7 +1323,7 @@ export async function renameAlbum(
 export async function deleteAlbum(
     albumId: number
 ): Promise<boolean> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
 
     try {
         const result = await client.query(
@@ -1335,7 +1341,7 @@ export async function deleteAlbum(
 
 // Read the primary database; failures must never be interpreted as a missing receipt.
 export async function getReplacementReceipt(operationId: string): Promise<ReplacementReceipt | undefined> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
     try {
         const result = await client.query<ReplacementReceipt>(
             `SELECT operation_id::text AS "operationId", media_id AS "mediaId", target_path AS target,
@@ -1354,7 +1360,7 @@ async function lockReplacementTransaction(client: PoolClient, operationId: strin
 // absence conclusive. The original transaction must have released the same lock.
 export async function withReplacementRecoveryDatabase<T>(operationId: string, mediaId: number,
     action: (evidence: ReplacementEvidence) => Promise<T>): Promise<T> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
     try {
         await client.query("BEGIN ISOLATION LEVEL READ COMMITTED READ ONLY");
         await lockReplacementTransaction(client, operationId);
@@ -1376,7 +1382,7 @@ export async function withReplacementRecoveryDatabase<T>(operationId: string, me
 // Receipt absence is conclusive only after acquiring the original operation lock.
 export async function withDeletionRecoveryDatabase<T>(operationId: string, mediaId: number, target: string,
     action: (evidence: DeletionEvidence) => Promise<T>): Promise<T> {
-    const client = await pool.connect();
+    const client = await getPool().connect();
     try {
         await client.query("BEGIN ISOLATION LEVEL READ COMMITTED READ ONLY");
         const primary = await client.query("SELECT pg_is_in_recovery() AS standby");
@@ -1398,4 +1404,4 @@ export async function withDeletionRecoveryDatabase<T>(operationId: string, media
 }
 
 // Maintenance CLI shutdown; request handlers keep their shared pool alive.
-export async function closeMediaDatabase(): Promise<void> { await pool.end(); }
+export async function closeMediaDatabase(): Promise<void> { if (pool) await pool.end(); pool = undefined; poolUrl = undefined; }

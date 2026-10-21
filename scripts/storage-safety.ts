@@ -19,13 +19,13 @@ export const storageSystem = {
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function getMediaStorageRoot(): string {
     const root = process.env.MEDIA_STORAGE_ROOT;
-    if (!root || !path.isAbsolute(root) || path.resolve(root) === path.parse(root).root) {
+    if (!root || /[\u0000-\u001f\u007f]/.test(root) || !path.isAbsolute(root) || path.resolve(root) === path.parse(root).root) {
         throw new StorageUnavailableError("MEDIA_STORAGE_ROOT must be an explicit absolute media directory, not the filesystem root");
     }
     return path.resolve(root);
 }
 
-function configuration() {
+export function storageConfiguration() {
     const root = getMediaStorageRoot();
     const uuid = process.env.MEDIA_STORAGE_UUID;
     const installationId = process.env.MEDIA_STORAGE_ID;
@@ -54,7 +54,7 @@ function coveringMount(entries: Mount[], target: string): Mount | undefined {
 }
 
 async function inspect(expectedRoot: string) {
-    const config = configuration();
+    const config = storageConfiguration();
     if (config.root !== path.resolve(expectedRoot)) throw new Error("Storage root differs from configured installation");
     if (await fs.realpath(config.root) !== config.root) throw new Error("Configured storage root must not contain symlinks");
     const stat = await fs.stat(config.root, { bigint: true });
