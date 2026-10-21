@@ -1,3 +1,4 @@
+import { processingErrorResponse } from "@/scripts/processing-limits";
 import { readStorageFile } from "@/scripts/storage-safety";
 
 import { getMediaFileById } from "@/scripts/media-database";
@@ -41,7 +42,8 @@ export async function GET(
             await getOrCreateThumbnail(
                 media.media_id,
                 media.path,
-                media.file_type
+                media.file_type,
+                _request.signal
             );
 
         const thumbnail =
@@ -61,9 +63,6 @@ export async function GET(
             error
         );
 
-        return Response.json(
-            { error: "Thumbnail could not be read" },
-            { status: 500 }
-        );
+        return processingErrorResponse(error);
     }
 }

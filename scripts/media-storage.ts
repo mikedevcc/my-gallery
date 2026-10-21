@@ -1,8 +1,12 @@
+import { syncParents, syncReplacementPath } from "./replacement-recovery";
 import { assertMediaSegment, assertOriginalMediaPath, assertStagedMediaPath, assertMediaInputPath, canonicalOriginalDestination } from "./media-paths";
 import { acquireResolutionClaim, finishOwnedConflict, type ResolutionClaim } from "./conflict-resolution-lock";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { createWriteStream } from "node:fs";
+import { constants } from "node:fs";
+import { Transform } from "node:stream";
+import { ProcessingError, processingLimits, processingSignal } from "./processing-limits";
+import { reserveStaging } from "./staging-budget";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { randomUUID } from "node:crypto";
@@ -84,53 +88,85 @@ export function buildDestinationPath(
 }
 
 
-export async function stageMediaFile(
-    file: File
-): Promise<string> {
+export async function stageMediaFile(file: File): Promise<string> {
     const fileName = file.name;
     assertMediaSegment(fileName);
+    if (file.size > processingLimits().uploadBytes) throw new ProcessingError("Upload too large", 413);
+    const source = Readable.fromWeb(file.stream() as unknown as NodeReadableStream<Uint8Array>);
+    const staged = await stageMediaStream(fileName, source);
+    await staged.complete();
+    return staged.path;
+}
+
+/** Only the directory and inode created here can be discarded on upload failure. */
+export async function stageMediaStream(fileName: string, source: Readable, signal = processingSignal()) {
+    assertMediaSegment(fileName);
     const storage = await validateStorage();
-    const incomingPath = path.join(storage.root, ".incoming");
-
-    const jobPath = path.join(incomingPath, randomUUID());
-
-    // Create .incoming folder if not exist
-    await storage.assertAvailable(jobPath);
-    await createStorageDirectory(storage, jobPath);
-
+    const release = await reserveStaging(storage);
+    const jobPath = path.join(storage.root, ".incoming", randomUUID());
     const stagedPath = path.join(jobPath, fileName);
-
-    // Copy source file into .incoming
+    let directoryIdentity: { dev: number; ino: number } | undefined;
+    let fileIdentity: { dev: number; ino: number } | undefined;
+    let markerIdentity: { dev: number; ino: number } | undefined;
+    const marker = path.join(jobPath, ".uploading");
+    const complete = async () => {
+        await storage.assertAvailable(marker);
+        const current = await fs.lstat(marker);
+        if (!markerIdentity || !current.isFile() || current.dev !== markerIdentity.dev || current.ino !== markerIdentity.ino) throw new Error("Upload marker changed; retained for investigation");
+        await fs.unlink(marker);
+        markerIdentity = undefined;
+        await syncParents(storage.root, marker);
+    };
+    const discard = async () => {
+        await storage.assertAvailable(jobPath);
+        const directory = await fs.lstat(jobPath).catch(error => {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+            throw error;
+        });
+        if (!directory) return;
+        if (!directoryIdentity || directory.dev !== directoryIdentity.dev || directory.ino !== directoryIdentity.ino || !directory.isDirectory()) throw new Error("Staging directory changed; retained for investigation");
+        const file = await fs.lstat(stagedPath).catch(error => {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+            throw error;
+        });
+        if (file) {
+            if (!fileIdentity || file.isSymbolicLink() || file.dev !== fileIdentity.dev || file.ino !== fileIdentity.ino) throw new Error("Staging file changed; retained for investigation");
+            await storage.assertAvailable(stagedPath);
+            await fs.unlink(stagedPath);
+            await syncReplacementPath(storage.root, jobPath);
+        }
+        if (markerIdentity) await complete();
+        // rmdir refuses unknown artifacts; never recursively delete a failed upload.
+        await fs.rmdir(jobPath);
+    };
     try {
+        await createStorageDirectory(storage, jobPath);
+        directoryIdentity = await fs.lstat(jobPath);
+        await storage.assertAvailable(marker);
+        const markerHandle = await fs.open(marker, "wx", 0o600);
+        try { markerIdentity = await markerHandle.stat(); await markerHandle.writeFile("incomplete-upload\n"); await markerHandle.sync(); }
+        finally { await markerHandle.close(); }
+        // Persist the marker and its ancestors before any partial media bytes.
+        await syncParents(storage.root, marker);
         await storage.assertAvailable(stagedPath);
-        const webStream = file.stream();
-        
-        const source = Readable.fromWeb(
-            webStream as unknown as NodeReadableStream<Uint8Array>
-        );
-
-        const destination = createWriteStream(stagedPath, { flags: "wx" });
-
-        await pipeline(source, destination);
-        await storage.assertAvailable(stagedPath);
-
-        return stagedPath;
-    }
-    catch (error) {
-        // remove a potentially incomplete staged file
+        const handle = await fs.open(stagedPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+        let bytes = 0;
+        const limit = new Transform({ transform(chunk, _encoding, callback) {
+            bytes += chunk.length;
+            callback(bytes > processingLimits().uploadBytes ? new ProcessingError("Upload too large", 413) : null, chunk);
+        } });
         try {
-            await storage.assertAvailable(jobPath);
-            await fs.rm(jobPath, { 
-                recursive: true,
-                force: true
-            });
-        }
-        catch (cleanupError) {
-            console.error("Failed to clean up staged file:", cleanupError);
-        }
-
+            fileIdentity = await handle.stat();
+            await pipeline(source, limit, handle.createWriteStream({ autoClose: true, flush: true }), { signal });
+        } finally { await handle.close(); }
+        if (!bytes) throw new ProcessingError("Empty upload", 400);
+        await storage.assertAvailable(stagedPath);
+        return { path: stagedPath, discard, complete };
+    } catch (error) {
+        if (directoryIdentity) await discard().catch(cleanup => console.error("Upload cleanup retained artifacts:", cleanup));
+        if (signal?.aborted) throw new ProcessingError("Upload cancelled", 408);
         throw error;
-    }
+    } finally { release(); }
 }
 
 
@@ -271,6 +307,8 @@ export async function findStagedConflictFile(
         conflictDirectory,
         { withFileTypes: true }
     );
+
+    if (entries.some(entry => entry.name === ".uploading")) throw new ProcessingError("Upload is incomplete or requires manual cleanup", 409);
 
     // make sure exactly one file exists
     const files = entries.filter(

@@ -4,11 +4,11 @@ import { validateStorage } from "./storage-safety";
 
 import path from "node:path";
 import fs from "node:fs/promises";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { runMediaSubprocess } from "./media-subprocess";
 
 
-const execFileAsync = promisify(execFile);
+
+
 
 
 type ExifData = Record<string, unknown>;
@@ -103,7 +103,7 @@ async function runExifTool(
 ): Promise<ExifData> {
     const storage = await validateStorage();
     await storage.assertAvailable(filePath);
-    const { stdout } = await execFileAsync("exiftool", [...args, filePath]);
+    const { stdout } = await runMediaSubprocess("exiftool", [...args, filePath]);
     await storage.assertAvailable(filePath);
 
     const parsed: unknown = JSON.parse(stdout);

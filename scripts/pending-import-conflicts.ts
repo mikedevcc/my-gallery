@@ -1,3 +1,4 @@
+import { checkProcessingCancellation, ProcessingError } from "./processing-limits";
 import { assertStagedMediaPath, canonicalOriginalDestination } from "./media-paths";
 import fs from "node:fs/promises";
 import { validateStorage, readStorageFile, StorageUnavailableError } from "./storage-safety";
@@ -30,10 +31,16 @@ export async function listPendingConflicts(): Promise<ImportConflict[]> {
         if (error.code === "ENOENT") { await storage.assertAvailable(incoming); return []; }
         throw error;
     });
+    if (entries.length > 10_000) throw new ProcessingError("Too many staged jobs; maintenance required");
     const conflicts: ImportConflict[] = [];
     for (const entry of entries) {
+        checkProcessingCancellation();
         if (!entry.isDirectory()) continue;
         try {
+            const marker = path.join(incoming, entry.name, ".uploading");
+            await storage.assertAvailable(marker);
+            try { await fs.lstat(marker); continue; }
+            catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
             const stagedPath = await findStagedConflictFile(entry.name);
             const metadataPath = path.join(incoming, entry.name, metadataName);
             try {
@@ -59,6 +66,7 @@ export async function listPendingConflicts(): Promise<ImportConflict[]> {
             await savePendingConflict(stagedPath, conflict);
             conflicts.push(conflict);
         } catch (error) {
+            if (error instanceof ProcessingError) throw error;
             if (error instanceof StorageUnavailableError) throw error;
             console.error("Could not recover staged conflict", entry.name, error);
         }

@@ -153,3 +153,6 @@ the actual deployment separately before enabling media writes.
 
 For upload/destination component rules, private namespaces, symlink handling and
 legacy-path compatibility, see [media path security](media-path-security.md).
+
+For streaming-upload limits, processing admission, temporary-storage budgets and
+Debian resource controls, see [processing limits](processing-limits.md).

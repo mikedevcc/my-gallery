@@ -4,7 +4,7 @@ import path from "node:path";
 export class InvalidMediaPathError extends Error {}
 const internalNames = new Set([
     ".incoming", ".destination-locks", ".replacement-operations", ".deletion-operations",
-    ".thumbnails", ".resolution-lock", ".conflict.json", ".mygallery-storage.json",
+    ".thumbnails", ".resolution-lock", ".uploading", ".conflict.json", ".mygallery-storage.json",
 ]);
 const recoveryName = /\.(?:backup|publish)-[0-9a-f-]{36}$/i;
 const ownerTemporary = /^\.owner-[0-9a-f-]{36}\.tmp$/i;

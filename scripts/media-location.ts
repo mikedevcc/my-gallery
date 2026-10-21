@@ -1,3 +1,4 @@
+import { ProcessingError, processingSignal } from "./processing-limits";
 export type ResolvedLocation = {
     city?: string;
     country?: string;
@@ -26,7 +27,7 @@ export async function resolveLocation(
     url.searchParams.set("format", "jsonv2");
     url.searchParams.set("addressdetails", "1");
 
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: AbortSignal.any([AbortSignal.timeout(10_000), ...(processingSignal() ? [processingSignal()!] : [])]) });
 
     if (!response.ok) {
         throw new Error(
@@ -34,7 +35,21 @@ export async function resolveLocation(
         );
     }
 
-    const data = await response.json() as NominatimReverseResponse;
+    if (!response.body) throw new ProcessingError("Empty geocoder response", 502);
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let bytes = 0;
+    let data: NominatimReverseResponse;
+    try {
+        while (true) {
+            const result = await reader.read();
+            if (result.done) break;
+            bytes += result.value.byteLength;
+            if (bytes > 65536) throw new ProcessingError("Geocoder response exceeds limit", 502);
+            chunks.push(result.value);
+        }
+        data = JSON.parse(Buffer.concat(chunks).toString("utf8")) as NominatimReverseResponse;
+    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
 
     const address = data.address;
 

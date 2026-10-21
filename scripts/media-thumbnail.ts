@@ -1,3 +1,4 @@
+import { reserveStaging } from "./staging-budget";
 import { assertMediaId } from "./media-paths";
 import { withDestinationLock } from "./destination-lock";
 import path from "node:path";
@@ -5,16 +6,18 @@ import fs from "node:fs/promises";
 import sharp from "sharp";
 import { createStorageDirectory, validateStorage } from "./storage-safety";
 
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { runMediaSubprocess } from "./media-subprocess";
+import { randomUUID } from "node:crypto";
+import { ProcessingError, processingLimits, processingSignal, checkProcessingCancellation, withProcessingJob } from "./processing-limits";
+
 
 import {
     getMediaStorageRoot
 } from "./media-storage";
 
 
-const execFileAsync = promisify(execFile);
-
+// Bound libvips worker parallelism in this Node process as well as job admission.
+sharp.concurrency(1);
 
 async function createThumbnailLocked(
     mediaId: number,
@@ -37,39 +40,58 @@ async function createThumbnailLocked(
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     if (exists) {
         await storage.assertAvailable(thumbnailPath);
+        if ((await fs.stat(thumbnailPath)).size >= processingLimits().thumbnailBytes) throw new ProcessingError("Cached thumbnail exceeds output limit", 422);
         return thumbnailPath;
     }
 
-    await storage.assertAvailable(mediaPath);
-    await storage.assertAvailable(thumbnailPath);
-    if (fileType === "IMAGE") {
-        await sharp(mediaPath)
-            .resize({
-                width: 600,
-                withoutEnlargement: true,
-            })
-            .webp()
-            .toFile(thumbnailPath);
-    }
-
-    if (fileType === "VIDEO") {
-        await execFileAsync(
-            "ffmpeg",
-            [
-                "-y",
-                "-loglevel", "error",
-                "-ss", "1",
-                "-i", mediaPath,
-                "-frames:v", "1",
-                "-vf", "scale=600:-1",
-                thumbnailPath,
-            ]
-        );
-
-    }
-
-    await storage.assertAvailable(thumbnailPath);
-    return thumbnailPath
+    checkProcessingCancellation();
+    const releaseBudget = await reserveStaging(storage);
+    try {
+        const temporary = path.join(thumbnailDirectory, `.${mediaId}-${randomUUID()}.tmp.webp`);
+        await storage.assertAvailable(mediaPath);
+        await storage.assertAvailable(temporary);
+        const handle = await fs.open(temporary, "wx", 0o600);
+        const identity = await handle.stat().finally(() => handle.close());
+        const verify = async () => {
+            await storage.assertAvailable(temporary);
+            const current = await fs.lstat(temporary);
+            if (!current.isFile() || current.dev !== identity.dev || current.ino !== identity.ino) throw new Error("Thumbnail temporary identity changed; retained for investigation");
+        };
+        try {
+            if (fileType === "IMAGE") {
+                const image = sharp(mediaPath, { limitInputPixels: processingLimits().pixels, sequentialRead: true })
+                    .timeout({ seconds: Math.min(3600, Math.max(1, Math.ceil(processingLimits().subprocessMs / 1000))) })
+                    .resize({ width: 600, withoutEnlargement: true }).webp();
+                image.on("error", () => { /* toFile and the cancellation check own error reporting */ });
+                const signal = processingSignal();
+                const abort = () => image.destroy(new Error("Thumbnail cancelled"));
+                signal?.addEventListener("abort", abort, { once: true });
+                try {
+                    checkProcessingCancellation();
+                    await image.toFile(temporary);
+                } finally { signal?.removeEventListener("abort", abort); }
+            } else {
+                await runMediaSubprocess("ffmpeg", [
+                    "-nostdin", "-y", "-loglevel", "error", "-threads", "1", "-filter_threads", "1",
+                    "-ss", "1", "-i", mediaPath, "-frames:v", "1",
+                    "-vf", "scale=600:-1", "-threads", "1", "-fs", String(processingLimits().thumbnailBytes), temporary,
+                ]);
+            }
+            checkProcessingCancellation();
+            await verify();
+            const size = (await fs.stat(temporary)).size;
+            if (!size || size >= processingLimits().thumbnailBytes) throw new ProcessingError("Thumbnail output exceeds limit or is empty", 422);
+            await storage.assertAvailable(mediaPath);
+            await storage.assertAvailable(thumbnailPath);
+            // Publish a complete cache entry only. The original destination lock is held.
+            await fs.link(temporary, thumbnailPath);
+        } finally {
+            await verify();
+            await fs.unlink(temporary);
+        }
+        await storage.assertAvailable(thumbnailPath);
+        return thumbnailPath;
+    } finally { releaseBudget(); }
 }
 
 
@@ -104,7 +126,7 @@ export async function deleteThumbnail(
 
 // Serialize cache generation with replacement/deletion so an old generator
 // cannot republish stale bytes after replacement invalidates the cache.
-export async function getOrCreateThumbnail(mediaId: number, mediaPath: string, fileType: "IMAGE" | "VIDEO"): Promise<string> {
+export async function getOrCreateThumbnail(mediaId: number, mediaPath: string, fileType: "IMAGE" | "VIDEO", signal?: AbortSignal): Promise<string> {
     assertMediaId(mediaId);
-    return withDestinationLock(getMediaStorageRoot(), mediaPath, async () => createThumbnailLocked(mediaId, mediaPath, fileType));
+    return withProcessingJob(signal, () => withDestinationLock(getMediaStorageRoot(), mediaPath, async () => createThumbnailLocked(mediaId, mediaPath, fileType)));
 }

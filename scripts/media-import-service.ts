@@ -1,3 +1,4 @@
+import { assertSupportedUpload, checkProcessingCancellation, withProcessingJob } from "./processing-limits";
 import { assertStagedMediaPath } from "./media-paths";
 import { acquireResolutionClaim, finishOwnedConflict, releaseUnboundResolutionClaim, type ResolutionClaim } from "./conflict-resolution-lock";
 import { validateStorage } from "./storage-safety";
@@ -58,27 +59,25 @@ type ConflictResolutionResult =
     };
 
 
-async function cleanupStagedJob(stagedPath: string, claim?: ResolutionClaim): Promise<void> {
+type StagedCleanupEvidence = { file: { dev: number; ino: number }; directory: { dev: number; ino: number } };
+async function cleanupStagedJob(stagedPath: string, claim?: ResolutionClaim, evidence?: StagedCleanupEvidence): Promise<void> {
     if (claim) { await finishOwnedConflict(getMediaStorageRoot(), claim); return; }
     const storage = await validateStorage();
     assertStagedMediaPath(storage.root, stagedPath);
     await storage.assertAvailable(stagedPath);
-    const marker = path.join(path.dirname(stagedPath), ".resolution-lock");
-    await storage.assertAvailable(marker);
-    try { await fs.lstat(marker); throw new DestinationRecoveryError("Conflict marker requires ownership-aware cleanup"); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-    try {
-        await fs.rm(path.dirname(stagedPath), {
-            recursive: true,
-            force: true,
-        });
+    const directory = path.dirname(stagedPath);
+    const currentDirectory = await fs.lstat(directory);
+    if (!evidence || !currentDirectory.isDirectory() || currentDirectory.dev !== evidence.directory.dev || currentDirectory.ino !== evidence.directory.ino) throw new DestinationRecoveryError("Staging directory identity changed; retained");
+    const names = await fs.readdir(directory);
+    if (names.some(name => name !== path.basename(stagedPath))) throw new DestinationRecoveryError("Staging artifacts require ownership-aware cleanup");
+    if (names.length) {
+        const current = await fs.lstat(stagedPath);
+        if (!current.isFile() || current.dev !== evidence.file.dev || current.ino !== evidence.file.ino) throw new DestinationRecoveryError("Staging file identity changed; retained");
+        await storage.assertAvailable(stagedPath);
+        await fs.unlink(stagedPath);
     }
-    catch (cleanupError) {
-        console.error(
-            "Failed to clean up staged file:",
-            cleanupError
-        );
-    }
+    await storage.assertAvailable(directory);
+    await fs.rmdir(directory);
 }
 
 
@@ -89,7 +88,9 @@ async function finalizeImportedMedia(
     location: ResolvedLocation,
     keepBoth = false,
     claim?: ResolutionClaim,
+    evidence?: StagedCleanupEvidence,
 ): Promise<number> {
+    checkProcessingCancellation();
     let mediaId: number | undefined;
     await finalizeStagedMedia(stagedPath, destination, async finalPath => {
         mediaId = await insertImportedMedia({
@@ -102,7 +103,7 @@ async function finalizeImportedMedia(
         }, location.country, location.city);
     });
     if (mediaId === undefined) throw new Error("Finalization did not return a media ID");
-    await cleanupStagedJob(stagedPath, claim);
+    await cleanupStagedJob(stagedPath, claim, evidence);
     return mediaId;
 }
 
@@ -116,7 +117,11 @@ export async function processStagedMedia(
     jobId: string
 ): Promise<ServerImportResult> {
     assertStagedMediaPath(getMediaStorageRoot(), stagedPath);
+    const storage = await validateStorage();
+    await storage.assertAvailable(stagedPath);
+    const evidence = { file: await fs.lstat(stagedPath), directory: await fs.lstat(path.dirname(stagedPath)) };
     try {
+        checkProcessingCancellation();
         const imported = await importMedia(stagedPath);
 
         const { latitude, longitude } = imported.media;
@@ -128,6 +133,7 @@ export async function processStagedMedia(
             location = resolvedLocation
         }
 
+        checkProcessingCancellation();
         const destination = buildDestinationPath(imported, location.city);
 
         const exists = await destinationExists(destination);
@@ -166,7 +172,7 @@ export async function processStagedMedia(
             return { type: "CONFLICT", conflict };
         }
 
-        const media_id = await finalizeImportedMedia(stagedPath, destination, imported, location);
+        const media_id = await finalizeImportedMedia(stagedPath, destination, imported, location, false, undefined, evidence);
 
         return {
             type: "COMPLETED",
@@ -174,7 +180,7 @@ export async function processStagedMedia(
         };
     }
     catch (error) {
-        if (!mustPreserveStaging(error)) await cleanupStagedJob(stagedPath);
+        if (!mustPreserveStaging(error)) await cleanupStagedJob(stagedPath, undefined, evidence);
 
         throw error;
     }
@@ -185,9 +191,11 @@ export async function importMediaToLibrary(
     file: File,
     jobId: string
 ): Promise<ServerImportResult> {
-        const stagedPath = await stageMediaFile(file);
-        
-        return processStagedMedia(stagedPath, jobId);
+        assertSupportedUpload(file.name);
+        return withProcessingJob(undefined, async () => {
+            const stagedPath = await stageMediaFile(file);
+            return processStagedMedia(stagedPath, jobId);
+        });
 }
 
 
@@ -207,6 +215,7 @@ async function applyStagedConflictResolution(
         const stagedPath = await findStagedConflictFile(conflictId);
 
         try {
+            checkProcessingCancellation();
             const imported = await importMedia(stagedPath);
         
             const { latitude, longitude } = imported.media;
@@ -218,6 +227,7 @@ async function applyStagedConflictResolution(
                 location = resolvedLocation
             }
 
+            checkProcessingCancellation();
             const destination = buildDestinationPath(imported, location.city);
 
             claim.retain = true;
@@ -236,6 +246,7 @@ async function applyStagedConflictResolution(
     else if (action === "REPLACE") {
         const stagedPath = await findStagedConflictFile(conflictId);
 
+        checkProcessingCancellation();
         const imported = await importMedia(stagedPath);
     
         const { latitude, longitude } = imported.media;
@@ -247,6 +258,7 @@ async function applyStagedConflictResolution(
             location = resolvedLocation
         }
 
+        checkProcessingCancellation();
         const destination = buildDestinationPath(imported, location.city);
 
         const existingMedia = await findMediaByPath(destination);
@@ -268,6 +280,7 @@ async function applyStagedConflictResolution(
             },
         };
 
+        checkProcessingCancellation();
         await replaceMediaAtDestination({
             mediaId, readReceipt: getReplacementReceipt, withRecoveryDatabase: withReplacementRecoveryDatabase,
             root: getMediaStorageRoot(),
