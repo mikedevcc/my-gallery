@@ -91,6 +91,7 @@ export function PhotosPage() {
         );
     }
 
+
     useEffect(() => {
         async function loadMedia() {
             try {
@@ -485,7 +486,248 @@ export function AlbumsPage() {
 }
 
 
-export function FavoritesPage(){return <><PageHeading eyebrow="CLOSE TO HEART" title="Favorites" subtitle="The moments you love most"/><PhotoGrid items={photos.filter(p=>p.favorite)}/></>}
+export function FavoritesPage() {
+    const [media, setMedia] = useState<LibraryMedia[]>([]);
+
+    const [loading, setLoading] = useState(true);
+
+    const [error, setError] = useState<string | null>(null);
+
+    const [group, setGroup] = useState<GroupMode>('All');
+
+
+    async function reloadMedia() {
+        try {
+            const response =
+                await fetch(
+                    '/api/media?scope=all'
+                );
+
+            if (!response.ok) {
+                return;
+            }
+
+            const result =
+                await response.json() as LibraryMedia[];
+
+            setMedia(result.filter(item =>
+                item.favorite === true
+            ));
+        }
+        catch (error) {
+            console.error(
+                'Failed to refresh library:',
+                error
+            );
+        }
+    }
+
+
+    async function toggleFavoriteMedia(
+        mediaId: number,
+        favoriteState: boolean
+    ) {
+        const response = await fetch(
+            `/api/media/${mediaId}`,
+            {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    favorite: favoriteState,
+                }),
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error(
+                `Failed to toggle favorite: ${mediaId}`
+            );
+        }
+
+        setMedia(current =>
+            current
+                .map(item =>
+                    item.media_id === mediaId
+                        ? {
+                            ...item,
+                            favorite: favoriteState,
+                        }
+                        : item
+                )
+                .filter(item => item.favorite)
+        );
+    }
+
+
+    useEffect(() => {
+        async function loadMedia() {
+            try {
+                const response = await fetch('/api/media?scope=all');
+
+                if (!response.ok) {
+                    throw new Error(
+                        `Failed to load library (${response.status})`
+                    );
+                }
+
+                const result = await response.json() as LibraryMedia[];
+
+                setMedia(result.filter(item => 
+                    item.favorite === true
+                ));
+            }
+            catch (error) {
+                setError(
+                    error instanceof Error
+                        ? error.message
+                        : 'Failed to load library'
+                );
+            }
+            finally {
+                setLoading(false);
+            }
+        }
+
+        void loadMedia();
+    }, []);
+
+
+    useEffect(() => {
+        function handleLibraryUpdated() {
+            
+
+            void reloadMedia();
+        }
+
+        window.addEventListener(
+            'media-library-updated',
+            handleLibraryUpdated
+        );
+
+        return () => {
+            window.removeEventListener(
+                'media-library-updated',
+                handleLibraryUpdated
+            );
+        };
+    }, []);
+
+
+    const groupedSections = groupMediaByDate(media, group);
+
+    if (loading) {
+        return (
+            <div className="empty-state">
+                <h2>Loading Favorites...</h2>
+            </div>
+        );
+    }
+
+
+    if (error) {
+        return (
+            <div className="empty-state">
+                <h2>
+                    Unable to load favorites
+                </h2>
+
+                <p>{error}</p>
+            </div>
+        );
+    }
+
+
+    return (
+        <>
+            <PageHeading 
+                eyebrow="CLOSE TO HEART"
+                title="Favorites"
+                subtitle="The moments you love most"
+            />
+
+            <div className="timeline-controls">
+                <div
+                    className="segmented"
+                    aria-label="Group media by"
+                >
+                    {[
+                        'All',
+                        'Years',
+                        'Months',
+                        'Days',
+                    ].map(value => (
+                        <button
+                            key={value}
+                            onClick={() =>
+                                setGroup(
+                                    value as
+                                        'All' |
+                                        'Years' |
+                                        'Months' |
+                                        'Days'
+                                )
+                            }
+                            className={
+                                group === value
+                                    ? 'selected'
+                                    : ''
+                            }
+                        >
+                            {value}
+                        </button>
+                    ))}
+                </div>
+
+                <span className="photo-total">
+                    {media.length.toLocaleString()}{' '}
+                    {media.length === 1
+                        ? 'memory'
+                        : 'memories'}
+                </span>
+            </div>
+
+            {media.length === 0 ? (
+                <EmptyState
+                    title="No favorites yet"
+                    text="Favorite photos or videos to see them here."
+                />
+            ) : (
+                groupedSections.map(
+                    ([title, items]) => (
+                        <section
+                            className="timeline-section"
+                            key={title}
+                        >
+                            <div className="section-heading">
+                                <div>
+                                    <h2>
+                                        {title}
+                                    </h2>
+
+                                    <p>
+                                        {items.length}{' '}
+                                        {items.length === 1
+                                            ? 'item'
+                                            : 'items'}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <LibraryMediaGrid
+                                items={items}
+                                onToggleFavorite={toggleFavoriteMedia}
+                            />
+                        </section>
+                    )
+                )
+            )}
+        </>
+    )
+}
+
+
 export function SearchPage(){const params=useSearchParams();const initial=params.get('q')||'';const [query,setQuery]=useState(initial);const [filter,setFilter]=useState('All');const q=query.toLowerCase().trim();const result=photos.filter(p=>!q||[p.title,p.location?.city,p.location?.country,...p.tags,p.camera?.model].some(s=>s?.toLowerCase().includes(q)));return <><PageHeading eyebrow="DISCOVER" title="Search" subtitle="Find any trip, moment, or memory"/><div className="search-hero"><Icon name="search" size={24}/><input aria-label="Search library" autoFocus value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search photos, trips, or anything..."/><span>↵</span></div><div className="filter-row">{['All','Photos','Trips','Albums','Videos'].map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}</div>{!q&&<div className="suggestions"><span>TRY SEARCHING FOR</span>{['Kyoto temples','Singapore','Sony A7 III','Nature','Iceland'].map(s=><button key={s} onClick={()=>setQuery(s)}><Icon name="search" size={14}/>{s}</button>)}</div>}<div className="results-heading"><h2>{q?`Results for “${query}”`:'Explore your library'}</h2><span>{filter==='All'||filter==='Photos'?result.length:filter==='Trips'?trips.length:filter==='Albums'?albums.length:0} results</span></div>{filter==='Trips'?<TripGrid items={trips.filter(t=>!q||t.name.toLowerCase().includes(q)||t.places.toLowerCase().includes(q))}/>:filter==='Albums'?<AlbumGrid items={albums.filter(a=>!q||a.name.toLowerCase().includes(q))}/>:filter==='Videos'?<EmptyState title="No videos yet" text="Videos will appear here when your library is connected."/>:result.length?<PhotoGrid items={result}/>:<EmptyState title="No matches found" text="Try another trip, subject, or camera name."/>}</>}
 export function SimplePage({kind}:{kind:'Recently Added'|'Videos'|'Screenshots'|'Trash'}){const items=kind==='Recently Added'?photos.slice(0,8):[];return <><PageHeading eyebrow="YOUR LIBRARY" title={kind} subtitle={kind==='Recently Added'?'The newest moments in your library':`${kind} in your library`}/>{items.length?<PhotoGrid items={items}/>:<EmptyState title={`No ${kind.toLowerCase()} yet`} text="Your collection will appear here when your library is connected."/>}</>}
 
