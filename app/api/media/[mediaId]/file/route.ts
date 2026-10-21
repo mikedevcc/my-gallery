@@ -1,104 +1,25 @@
-import { readStorageFile } from "@/scripts/storage-safety";
-import path from "node:path";
+import { getMediaFileById } from "@/scripts/media-database";
+import { streamMediaFile, mediaErrorResponse, MediaDeliveryError } from "@/scripts/media-stream";
 
-import {
-    getMediaFileById,
-} from "@/scripts/media-database";
+export const runtime = "nodejs";
+type RouteContext = { params: Promise<{ mediaId: string }> };
 
-
-type RouteContext = {
-    params: Promise<{
-        mediaId: string;
-    }>;
-};
-
-
-function getContentType(fileName: string): string {
-    const extension =
-        path.extname(fileName).toLowerCase();
-
-    switch (extension) {
-        case ".jpg":
-        case ".jpeg":
-            return "image/jpeg";
-
-        case ".png":
-            return "image/png";
-
-        case ".webp":
-            return "image/webp";
-
-        case ".gif":
-            return "image/gif";
-
-        case ".avif":
-            return "image/avif";
-
-        case ".mp4":
-            return "video/mp4";
-
-        case ".webm":
-            return "video/webm";
-
-        case ".mov":
-            return "video/quicktime";
-
-        default:
-            return "application/octet-stream";
-    }
-}
-
-
-export async function GET(
-    _request: Request,
-    context: RouteContext
-) {
+async function serve(request: Request, context: RouteContext) {
     const { mediaId } = await context.params;
-
     const parsedMediaId = Number(mediaId);
-
-    if (
-        !Number.isInteger(parsedMediaId) ||
-        parsedMediaId <= 0
-    ) {
-        return Response.json(
-            { error: "Invalid media ID" },
-            { status: 400 }
-        );
-    }
-
-    const media =
-        await getMediaFileById(parsedMediaId);
-
-    if (!media) {
-        return Response.json(
-            { error: "Media not found" },
-            { status: 404 }
-        );
-    }
-
+    if (!Number.isSafeInteger(parsedMediaId) || parsedMediaId <= 0) return mediaErrorResponse(request, new MediaDeliveryError(400, "Invalid media ID"), "Invalid media ID", { json: true });
     try {
-        const file = await readStorageFile(media.path);
-
-        return new Response(file, {
-            headers: {
-                "Content-Type": getContentType(
-                    media.file_name
-                ),
-                "Content-Disposition":
-                    `inline; filename="${media.file_name}"`,
+        const media = await getMediaFileById(parsedMediaId);
+        if (!media) return mediaErrorResponse(request, new MediaDeliveryError(404, "Media not found"), "Media not found", { json: true });
+        return await streamMediaFile(request, {
+            filePath: media.path, destination: media.path, fileName: media.file_name,
+            revalidate: async () => {
+                const current = await getMediaFileById(parsedMediaId);
+                if (!current) throw new MediaDeliveryError(404, "Media not found");
+                if (current.path !== media.path || current.file_name !== media.file_name || current.file_type !== media.file_type) throw new MediaDeliveryError(409, "Media changed; retry");
             },
         });
-    }
-    catch (error) {
-        console.error(
-            `Failed to read media ${parsedMediaId}:`,
-            error
-        );
-
-        return Response.json(
-            { error: "Media file could not be read" },
-            { status: 500 }
-        );
-    }
+    } catch (error) { return mediaErrorResponse(request, error, "Media unavailable", { json: true }); }
 }
+export const GET = serve;
+export const HEAD = serve;

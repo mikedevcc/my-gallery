@@ -2,10 +2,10 @@ import fs from "node:fs/promises";
 import { validateStorage, readStorageFile, StorageUnavailableError } from "./storage-safety";
 import path from "node:path";
 import type { ImportConflict } from "@/lib/import/import-conflict";
-import { getMediaStorageRoot, findStagedConflictFile, buildDestinationPath } from "./media-storage";
+import { findStagedConflictFile, buildDestinationPath } from "./media-storage";
 import { importMedia } from "./media-import";
 import { resolveLocation } from "./media-location";
-import { findMediaByPath } from "./media-database";
+import { findMediaByPath, getMediaFileById } from "./media-database";
 
 const metadataName = ".conflict.json";
 export async function savePendingConflict(stagedPath: string, conflict: ImportConflict) {
@@ -58,13 +58,19 @@ export async function listPendingConflicts(): Promise<ImportConflict[]> {
     return conflicts;
 }
 
-export async function getConflictPreviewPath(conflictId: string, side: string) {
+export async function getConflictPreviewSelection(conflictId: string, side: string) {
+    if (side !== "incoming" && side !== "existing") throw new Error("Invalid preview side");
     const stagedPath = await findStagedConflictFile(conflictId);
-    if (side === "incoming") return stagedPath;
-    if (side !== "existing") throw new Error("Invalid preview side");
-    const conflict = JSON.parse((await readStorageFile(path.join(path.dirname(stagedPath), metadataName))).toString("utf8")) as ImportConflict;
-    if (conflict.type !== "FILENAME") throw new Error("Preview unavailable");
-    const relative = path.relative(getMediaStorageRoot(), conflict.existingPath);
-    if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("Invalid media path");
-    return conflict.existingPath;
+    const metadata = (await readStorageFile(path.join(path.dirname(stagedPath), metadataName))).toString("utf8");
+    const conflict = JSON.parse(metadata) as ImportConflict;
+    if (conflict.conflictId !== conflictId) throw new Error("Invalid conflict identity");
+    const destination = conflict.type === "FILENAME" ? conflict.existingPath
+        : conflict.type === "HASH" && side === "incoming" ? (await getMediaFileById(conflict.existingMediaId))?.path : undefined;
+    if (typeof destination !== "string") throw new Error("Preview unavailable");
+    const storage = await validateStorage();
+    const resolution = path.join(path.dirname(stagedPath), ".resolution-lock");
+    await storage.assertAvailable(resolution);
+    try { await fs.lstat(resolution); throw new Error("Conflict is being resolved"); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    return { filePath: side === "incoming" ? stagedPath : destination, destination, metadata };
 }
