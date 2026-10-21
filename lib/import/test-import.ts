@@ -6,18 +6,23 @@ import {
     validateImportJobs,
     applyValidationResults,
 } from "./validate-import-jobs";
+import type { ProcessFileResult } from "./process-file-result";
 import { processImportQueue } from "./process-import-queue";
 import { importMediaToLibrary } from "../../scripts/media-import-service";
 
 async function queueAdapter(
     jobId: string,
     file: File
-): Promise<void> {
-    const mediaId = await importMediaToLibrary(file);
+): Promise<ProcessFileResult> {
+    const result = await importMediaToLibrary(file, jobId);
 
-    console.log(
-        `Job ${jobId} imported as media ID ${mediaId}`
-    );
+    if (result.type === "COMPLETED") {
+        console.log(`Job ${jobId} imported as media ID ${result.mediaId}`);
+    } else {
+        console.log(`Job ${jobId} requires conflict resolution:`, result.conflict);
+    }
+
+    return result;
 }
 
 async function fileFromPath(filePath: string): Promise<File> {

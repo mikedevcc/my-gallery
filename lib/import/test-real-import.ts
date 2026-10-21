@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -17,9 +18,13 @@ async function main(): Promise<void> {
         path.basename(absolutePath)
     );
 
-    const mediaId = await importMediaToLibrary(file);
+    const result = await importMediaToLibrary(file, randomUUID());
 
-    console.log("Imported media ID:", mediaId);
+    if (result.type === "COMPLETED") {
+        console.log("Imported media ID:", result.mediaId);
+    } else {
+        console.log("Import requires conflict resolution:", result.conflict);
+    }
 }
 
 main().catch((error) => {
