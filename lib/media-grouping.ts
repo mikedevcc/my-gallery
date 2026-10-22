@@ -1,77 +1,26 @@
-export type GroupMode =
-    | 'All'
-    | 'Years'
-    | 'Months'
-    | 'Days';
+import { captureCalendar, type CaptureDateFields } from "./media-capture-date";
 
-export type DateGroupableMedia = {
-    date_taken: string | null;
-    date_imported?: string;
-};
+export type GroupMode = 'All' | 'Years' | 'Months' | 'Days';
+export type DateGroupableMedia = CaptureDateFields & { date_imported?: string };
 
-
-export function getMediaDate(
-    item: DateGroupableMedia
-): Date {
-    return new Date(
-        item.date_taken ??
-        item.date_imported ??
-        Date.now()
-    );
+// Calendar carrier for formatting only; missing capture dates stay missing.
+export function getMediaDate(item: DateGroupableMedia): Date | undefined {
+    return captureCalendar(item)?.clock;
 }
 
-export function groupMediaByDate<T extends DateGroupableMedia>(
-    items: T[],
-    mode: GroupMode
-): [string, T[]][] {
-    if (mode === 'All') {
-        return [['All', items]];
-    }
-
+export function groupMediaByDate<T extends DateGroupableMedia>(items: T[], mode: GroupMode): [string, T[]][] {
+    if (mode === 'All') return [['All', items]];
     const groups = new Map<string, T[]>();
-
     for (const item of items) {
         const date = getMediaDate(item);
-
-        let key: string;
-
-        if (mode === 'Years') {
-            key = date.toLocaleDateString(
-                'en-GB',
-                {
-                    year: 'numeric',
-                }
-            );
-        }
-        else if (mode === 'Months') {
-            key = date.toLocaleDateString(
-                'en-GB',
-                {
-                    month: 'long',
-                    year: 'numeric',
-                }
-            );
-        }
-        else {
-            key = date.toLocaleDateString(
-                'en-GB',
-                {
-                    day: 'numeric',
-                    month: 'long',
-                    year: 'numeric',
-                }
-            );
-        }
-
+        const key = !date ? 'Capture date unknown' : date.toLocaleDateString('en-GB', {
+            timeZone: 'UTC', year: 'numeric',
+            ...(mode === 'Years' ? {} : { month: 'long' as const }),
+            ...(mode === 'Days' ? { day: 'numeric' as const } : {}),
+        });
         const existing = groups.get(key);
-
-        if (existing) {
-            existing.push(item);
-        }
-        else {
-            groups.set(key, [item]);
-        }
+        if (existing) existing.push(item);
+        else groups.set(key, [item]);
     }
-
     return Array.from(groups.entries());
 }

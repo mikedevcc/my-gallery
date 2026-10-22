@@ -1,3 +1,4 @@
+import { captureDateFromExif } from "../lib/media-capture-date";
 import { assertMediaInputPath } from "./media-paths";
 import "dotenv/config";
 import { validateStorage } from "./storage-safety";
@@ -25,6 +26,8 @@ type MediaFileInfo = {
 
 type MediaMetadata = {
     dateTaken?: Date;
+    captureLocal?: string;
+    captureOffsetMinutes?: number;
     width?: number;
     height?: number;
     latitude?: number;
@@ -136,45 +139,8 @@ async function readMediaMetadataExif(
     const args = ["-json", "-n"];
     const metadata = await runExifTool(filePath, args);
 
-    let dateTaken: Date | undefined;
-
-    const subSecDate = getString(metadata, "SubSecDateTimeOriginal");
-    const originalDate = getString(metadata, "DateTimeOriginal");
-    const createDate = getString(metadata, "CreateDate");
-
-    let raw: string | undefined;
-    let assumeUtc = false;
-
-    if (subSecDate !== undefined) {
-        raw = subSecDate;
-    }
-    else if (originalDate !== undefined) {
-        raw = originalDate;
-    }
-    else if (createDate !== undefined) {
-        raw = createDate;
-        assumeUtc = true;
-    }
-    
-    if (raw !== undefined) {
-        let iso = raw.replace(
-            /^(\d{4}):(\d{2}):(\d{2}) /,
-            "$1-$2-$3T"
-        );
-
-        if (assumeUtc) {
-            iso += "Z";
-        }
-
-        const parseDate = new Date(iso);
-
-        if (!Number.isNaN(parseDate.getTime())) {
-            dateTaken = parseDate;
-        }
-    }
-
     return {
-        dateTaken,
+        ...captureDateFromExif(metadata),
         width: getNumber(metadata, "ImageWidth"),
         height: getNumber(metadata, "ImageHeight"),
         latitude: getNumber(metadata, "GPSLatitude"),

@@ -275,3 +275,10 @@ Migration 0003 has not been executed as part of this implementation.
 
 See [deletion tracking](../../docs/deletion-tracking.md) for durability and the
 explicit M1-B maintenance recovery and manual-investigation cases. Never edit applied 0001 or 0002.
+
+## Capture date fields (0004)
+
+`0004_media_capture_dates.sql` adds nullable camera-local clock/offset fields without
+backfilling existing media. Apply it before deploying capture-local-aware reads and
+writes. Stop writers during rollout; do not edit 0001–0003 or run an automatic down
+migration. See [capture-date policy and deployment](../../docs/capture-dates.md).

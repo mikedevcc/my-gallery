@@ -68,7 +68,10 @@ export function buildDestinationPath(
     imported: ImportedMedia,
     city?: string,
 ): string {
-    const year = imported.media.dateTaken?.getUTCFullYear()
+    // New imports use the camera calendar, even when their UTC instant is in
+    // another year. Date-only legacy development callers retain the UTC fallback.
+    const year = imported.media.captureLocal?.slice(0, 4)
+        ?? imported.media.dateTaken?.getUTCFullYear()
         ?? "Unknown";
 
     const location = city ?? "Unknown";

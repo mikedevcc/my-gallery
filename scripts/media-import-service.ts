@@ -242,7 +242,9 @@ async function applyStagedConflictResolution(
         }
 
         checkProcessingCancellation();
-        const destination = buildDestinationPath(imported, location.city);
+        // A staged conflict owns its recorded original, even if date/geocoder
+        // policy now computes a different destination for a new import.
+        const destination = claim.target;
 
         const existingMedia = await findMediaByPath(destination);
 

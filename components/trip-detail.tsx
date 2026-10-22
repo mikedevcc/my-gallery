@@ -29,6 +29,8 @@ type TripMediaRow = {
     file_type: 'IMAGE' | 'VIDEO';
     path: string;
     date_taken: string | null;
+    capture_local?: string | null;
+    capture_offset_minutes?: number | null;
     width: number | null;
     height: number | null;
     favorite: boolean;

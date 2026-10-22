@@ -1,5 +1,6 @@
 'use client';
 
+import { formatCaptureDate } from "../lib/media-capture-date";
 import Image from 'next/image';
 import Link from 'next/link';
 import {
@@ -24,6 +25,8 @@ type MediaDetails = {
     file_size: number;
     path: string;
     date_taken: string | null;
+    capture_local?: string | null;
+    capture_offset_minutes?: number | null;
     width: number | null;
     height: number | null;
     favorite: boolean;
@@ -52,6 +55,8 @@ type TripMediaRow = {
     file_type: 'IMAGE' | 'VIDEO';
     path: string;
     date_taken: string | null;
+    capture_local?: string | null;
+    capture_offset_minutes?: number | null;
     width: number | null;
     height: number | null;
     favorite: boolean;
@@ -72,6 +77,8 @@ export type LibraryMedia = {
     file_name: string;
     file_type: 'IMAGE' | 'VIDEO';
     date_taken: string | null;
+    capture_local?: string | null;
+    capture_offset_minutes?: number | null;
     date_imported: string;
     width: number | null;
     height: number | null;
@@ -742,26 +749,7 @@ export function Viewer({
                             <Icon name="calendar"/>
 
                             <span>
-                                {media.date_taken
-                                    ? new Date(
-                                        media.date_taken
-                                    )
-                                        .toLocaleString(
-                                            'en-GB',
-                                            {
-                                                day:
-                                                    'numeric',
-                                                month:
-                                                    'short',
-                                                year:
-                                                    'numeric',
-                                                hour:
-                                                    '2-digit',
-                                                minute:
-                                                    '2-digit',
-                                            }
-                                        )
-                                    : 'Date unknown'}
+                                {formatCaptureDate(media)}
                             </span>
 
                         </div>

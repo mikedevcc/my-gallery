@@ -6,7 +6,7 @@ function fields(value: object, names: readonly string[]): Record<string, unknown
     return Object.fromEntries(names.filter(name => Object.hasOwn(row, name)).map(name => [name, row[name]]));
 }
 export function publicMedia(value: object) {
-    const dto = fields(value, ["media_id", "file_name", "file_type", "file_size", "date_taken", "date_imported", "width", "height", "favorite",
+    const dto = fields(value, ["media_id", "file_name", "file_type", "file_size", "date_taken", "capture_local", "capture_offset_minutes", "date_imported", "width", "height", "favorite",
         "city_name", "country_name", "aperture", "iso", "exposure_time", "focal_length_mm", "focal_length_35mm", "flash", "white_balance",
         "duration_seconds", "frame_rate", "video_codec", "audio_codec", "bitrate"]);
     // Legacy metadata may have stored a full path in the filename column.

@@ -78,6 +78,10 @@ unset values. Request limits must cover upload limits; upload/subprocess timer
 values must fit Node's 2147483647 ms timer range. No database/storage variable is
 optional simply because a geocoder or processing limit has a default.
 
+Capture-date semantics and the required 0004 rollout are documented in
+[capture dates](capture-dates.md). Deploy the migration before this application version;
+no automatic historical backfill or storage relocation occurs.
+
 ## Build and release
 
 1. Provision PostgreSQL and storage separately, with a tested backup of database,

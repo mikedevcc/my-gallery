@@ -207,18 +207,24 @@ test("resolver SKIP respects a busy destination and releases only its unused cla
 }));
 
 for (const ambiguous of [false, true]) {
-    test(`resolver wrapper ${ambiguous ? "retains marker on ambiguous commit" : "uses journal finalization on success"}`, () => fixture(async ({ root, target, job, staged, marker }) => {
+    test(`resolver preserves legacy target with new capture year; ${ambiguous ? "retains marker on ambiguous commit" : "uses journal finalization on success"}`, () => fixture(async ({ root, target, job, staged, marker }) => {
         const serviceTarget = path.join(root, "Unknown", "Unknown", "incoming.jpg");
         await fs.mkdir(path.dirname(serviceTarget), { recursive: true }); await fs.rename(target, serviceTarget);
         await fs.writeFile(path.join(job, ".conflict.json"), JSON.stringify({ type: "FILENAME", conflictId: id, jobId: "job", existingPath: serviceTarget, existingMediaId: 1 }));
         // Fixture-only ExifTool emits constant metadata; never inspect actual media.
         const bin = path.join(root, "bin"); await fs.mkdir(bin);
-        await fs.writeFile(path.join(bin, "exiftool"), "#!/bin/sh\nprintf '%s\\n' '[{}]'\n", { mode: 0o700 });
+        await fs.writeFile(path.join(bin, "exiftool"), "#!/bin/sh\nprintf '%s\\n' '[{\"DateTimeOriginal\":\"2026:01:01 00:15:00+08:00\"}]'\n", { mode: 0o700 });
         const previousPath = process.env.PATH; process.env.PATH = `${bin}:${previousPath ?? ""}`;
         const { Pool } = await import("pg");
         let commitAttempted = false;
         const checkout = mock.method(Pool.prototype, "connect", async () => ({
-            query: async (sql: string) => {
+            query: async (sql: string, values?: unknown[]) => {
+                if (sql.trim().startsWith("UPDATE media")) {
+                    assert.equal(values?.[3], serviceTarget);
+                    assert.equal((values?.[4] as Date).toISOString(), "2025-12-31T16:15:00.000Z");
+                    assert.equal(values?.[11], "2026-01-01T00:15:00.000");
+                    assert.equal(values?.[12], 480);
+                }
                 if (sql.includes("FROM public.media_replacement_receipts") && ambiguous && commitAttempted) throw new Error("Receipt outcome unavailable");
                 if (sql === "COMMIT" && ambiguous) { commitAttempted = true; throw new Error("Commit acknowledgement lost"); }
                 if (sql.includes("media_replacement_receipts") && sql.trim().startsWith("SELECT")) return { rows: [], rowCount: 0 };

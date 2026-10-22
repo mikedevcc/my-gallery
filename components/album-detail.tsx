@@ -34,6 +34,8 @@ type AlbumMediaRow = {
     file_type: 'IMAGE' | 'VIDEO';
     path: string;
     date_taken: string | null;
+    capture_local?: string | null;
+    capture_offset_minutes?: number | null;
     date_imported: string;
     width: number | null;
     height: number | null;
