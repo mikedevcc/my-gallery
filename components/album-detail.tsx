@@ -580,7 +580,7 @@ export function AlbumDetail({
             )}
 
             <AlbumMediaPicker
-                key={album.album_id}
+                key={`album-picker-${album.album_id}`}
                 albumId={album.album_id}
                 open={mediaPickerOpen}
                 onClose={() =>
@@ -608,7 +608,7 @@ export function AlbumDetail({
             />
 
             <DeleteMediaModal
-                key={album.album_id}
+                key={`delete-media-${album.album_id}`}
                 open={deleteModalOpen}
                 mediaIds={validSelectedMediaIds}
                 onClose={() => {
