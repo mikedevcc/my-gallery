@@ -79,3 +79,40 @@ node --import tsx scripts/media-database.test.ts
 
 Tests use fresh temporary directories, mocked metadata callbacks, and child Node
 processes. They do not access configured user-media storage or PostgreSQL.
+
+## Ordinary import publication durability
+
+`finalizeStagedMedia` creates the destination hard link under its exclusive
+canonical destination lock. Before calling the metadata callback, it uses the H4
+`syncReplacementPath`/`syncParents` helpers to fsync the original inode through its
+new destination, every destination ancestor up to and including the validated
+storage root, and the staging parents. This includes newly created year/location
+directories. The callback in `finalizeImportedMedia` invokes `insertImportedMedia`;
+its PostgreSQL `COMMIT` completes inside that callback, after these filesystem
+barriers. The destination stays locked through callback completion and staging
+unlink. Staging parents are synchronized after unlink before releasing the lock.
+
+A publication/sync failure prevents the metadata callback. Once publication has
+started, sync failures, callback errors (including lost commit acknowledgment),
+and incomplete staging cleanup retain the destination lock. The published original
+is never removed as an attempted database rollback. A retry of the same destination
+fails busy before selecting an alternate name. Staging may already be absent after
+a cleanup-sync failure; the original still remains. Normal later job-directory or
+conflict cleanup is separate and can report an error after metadata committed.
+
+Ordinary imports still have no operation journal/commit receipt recovery protocol.
+Do not use replacement/deletion recovery commands or remove these retained locks
+automatically. Stop writers and independently inspect metadata, lock ownership,
+and both file identities before approving a manual repair. Do not blindly replay
+an import with an unknown commit outcome. Preexisting destinations still use the
+existing alternate-name behavior when no destination lock is retained.
+
+Power-loss guarantees require a local ext4/XFS filesystem and storage/controller
+that correctly honor file and directory fsync and write-cache flushes. These
+barriers do not make PostgreSQL and the filesystem one atomic transaction. PostgreSQL
+must retain durable WAL/commit settings, and the installation must preserve the
+storage root/mount and its provisioning. Disk failure, lying USB/HDD write caches,
+external writers and lost filesystem/device state remain outside this guarantee;
+keep tested backups and consider a UPS. Temporary-fixture tests verify syscall
+ordering, injected fsync errors and worker termination; they do not simulate
+physical power loss or prove actual HDD firmware behavior.

@@ -190,13 +190,22 @@ export async function finalizeStagedMedia(
             lock.markUnresolved();
             await lock.assertStorage(stagedPath);
             await fs.link(stagedPath, lock.destination);
-            // Hold the destination through metadata insertion and staging cleanup.
-            // Uncertain DB outcomes retain both file names and the lock for review.
+            // A hard link is atomic but not durable until its directory is synced.
+            // Flush the shared inode, then every destination ancestor (including
+            // newly created directories and the storage root) BEFORE the callback
+            // can insert metadata and COMMIT. Persist staging evidence as well.
+            await syncReplacementPath(root, lock.destination);
+            await syncParents(root, lock.destination);
+            await syncParents(root, stagedPath);
+            // Hold ownership through publication, metadata commit and cleanup.
+            // Any uncertain outcome retains the original and the destination lock.
             await lock.assertOwned();
             await onFinalized?.(lock.destination);
             await lock.assertOwned();
             await lock.assertStorage(stagedPath);
             await fs.unlink(stagedPath);
+            await syncParents(root, stagedPath);
+            await lock.assertOwned();
             lock.markSafe();
             return lock.destination;
         });
