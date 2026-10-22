@@ -310,7 +310,6 @@ export function TripDetail({
     return (
         <>
             {error && <p role="alert">{error}</p>}
-            <BulkMediaFeedback items={bulkRemoval.items} />
             <div className="trip-hero">
                 {trip.cover_media_id !== null && (
                     <Image

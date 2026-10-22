@@ -143,11 +143,32 @@ export function AlbumMediaPicker({
     }
 
     async function addSelectedMedia() {
-        await bulk.run(selectedMediaIds, ids => {
-            setSelectedMediaIds(current => current.filter(id => !ids.includes(id)));
-            setMedia(current => current.filter(item => !ids.includes(item.media_id)));
-        });
+        const result = await bulk.run(
+            selectedMediaIds,
+            ids => {
+                setSelectedMediaIds(current =>
+                    current.filter(id => !ids.includes(id))
+                );
+
+                setMedia(current =>
+                    current.filter(item =>
+                        !ids.includes(item.media_id)
+                    )
+                );
+            }
+        );
+
+        if (result.allConfirmed) {
+            onClose();
+        }
     }
+
+    const fileNames = Object.fromEntries(
+        media.map(item => [
+            item.media_id,
+            item.file_name,
+        ])
+    );
 
     return (
         <div className="album-media-picker-backdrop">
@@ -223,7 +244,10 @@ export function AlbumMediaPicker({
                     )}
                 </div>
 
-                <BulkMediaFeedback items={bulk.items} />
+                <BulkMediaFeedback
+                    items={bulk.items}
+                    fileNames={fileNames}
+                />
                 <div className="album-media-picker-footer">
                     <span>
                         {selectedMediaIds.length}{' '}

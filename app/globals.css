@@ -1588,6 +1588,39 @@ textarea:focus-visible {
     opacity: 1;
 }
 
+.bulk-media-feedback {
+    margin: 12px 0;
+    padding: 14px 16px;
+    border-radius: 8px;
+    background: #fff5f4;
+    border: 1px solid #f0d4d0;
+    color: #9b433d;
+    font-size: 12px;
+}
+
+.bulk-media-feedback p {
+    margin: 0 0 8px;
+    font-weight: 600;
+}
+
+.bulk-media-feedback ul {
+    margin: 0;
+    padding-left: 18px;
+}
+
+.bulk-media-feedback li {
+    margin: 4px 0;
+    overflow-wrap: anywhere;
+}
+
+.bulk-feedback-warning {
+    color: #956b24;
+}
+
+.bulk-feedback-warning + .bulk-feedback-error,
+.bulk-feedback-error + .bulk-feedback-warning {
+    margin-top: 14px;
+}
 
 
 @media (max-width: 760px) {
