@@ -62,8 +62,8 @@ test("incoming and existing conflict previews retain MIME/no-store restrictions 
 test("invalid IDs, absent metadata/files, and unsupported previews fail without disclosure", () => fixture(async state => {
     assert.equal((await mediaGet(request(), context("bad"))).status, 400);
     state.media = undefined; assert.equal((await mediaGet(request(), context())).status, 404);
-    assert.equal((await previewGet(preview("invalid"))).status, 404);
-    assert.equal((await previewGet(preview("incoming", "GET", undefined, "..%2F..%2Fsecret"))).status, 404);
+    assert.equal((await previewGet(preview("invalid"))).status, 400);
+    assert.equal((await previewGet(preview("incoming", "GET", undefined, "..%2F..%2Fsecret"))).status, 400);
     await fs.rename(state.staged, path.join(path.dirname(state.staged), "incoming.txt"));
     assert.equal((await previewGet(preview())).status, 415);
     await fs.rm(path.join(path.dirname(state.staged), ".conflict.json"));
@@ -105,4 +105,14 @@ test("active conflict resolution blocks previews and a missing original returns 
     assert.equal((await previewGet(preview())).status, 404);
     await fs.rmdir(resolution); await fs.unlink(state.target);
     assert.equal((await mediaGet(request(), context())).status, 404);
+}));
+
+test("download headers expose only filenames even for legacy Windows-style metadata", () => fixture(async state => {
+    state.media!.file_name = "C:\\Users\\Confidential\\original.jpg";
+    const response = await mediaGet(request(), context());
+    assert.equal(response.status, 200);
+    const disposition = response.headers.get("content-disposition")!;
+    assert.match(disposition, /original.jpg/);
+    assert.doesNotMatch(disposition, /Users|Confidential|C:/);
+    assert.equal(await response.text(), "image bytes");
 }));

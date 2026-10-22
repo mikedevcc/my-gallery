@@ -1,3 +1,4 @@
+import { ApiInputError, conflictId } from "@/scripts/api-safety";
 import path from "node:path";
 import { getConflictPreviewSelection } from "@/scripts/pending-import-conflicts";
 import { streamMediaFile, mediaErrorResponse, MediaDeliveryError } from "@/scripts/media-stream";
@@ -7,6 +8,8 @@ async function serve(request: Request) {
     const url = new URL(request.url);
     const id = url.searchParams.get("id") ?? "", side = url.searchParams.get("side") ?? "";
     try {
+        conflictId(id);
+        if (side !== "incoming" && side !== "existing") throw new ApiInputError("Invalid preview side");
         const selection = await getConflictPreviewSelection(id, side);
         return await streamMediaFile(request, {
             filePath: selection.filePath, destination: selection.destination, fileName: path.basename(selection.filePath),

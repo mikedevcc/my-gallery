@@ -1,3 +1,4 @@
+import { logApiFailure } from "./api-diagnostics";
 import { checkProcessingCancellation, ProcessingError } from "./processing-limits";
 import { assertStagedMediaPath, canonicalOriginalDestination } from "./media-paths";
 import fs from "node:fs/promises";
@@ -68,7 +69,7 @@ export async function listPendingConflicts(): Promise<ImportConflict[]> {
         } catch (error) {
             if (error instanceof ProcessingError) throw error;
             if (error instanceof StorageUnavailableError) throw error;
-            console.error("Could not recover staged conflict", entry.name, error);
+            logApiFailure("pending-conflict", error);
         }
     }
     return conflicts;

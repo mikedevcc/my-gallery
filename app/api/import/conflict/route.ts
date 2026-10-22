@@ -1,35 +1,25 @@
+import { publicImportConflict } from "@/scripts/api-dto";
+import { ApiInputError, conflictId, objectBody } from "@/scripts/api-safety";
 import { readBoundedJson } from "@/scripts/upload-request";
-import { withProcessingJob, processingErrorResponse, ProcessingError } from "@/scripts/processing-limits";
+import { withProcessingJob, processingErrorResponse } from "@/scripts/processing-limits";
 import { listPendingConflicts } from "@/scripts/pending-import-conflicts";
 import type { ConflictAction } from "@/lib/import/import-conflict";
 import { resolveStagedConflict } from "@/scripts/media-import-service";
 
-type ResolveConflictRequest = {
-    conflictId: string;
-    action: ConflictAction;
-};
-
 export async function POST(request: Request) {
     try {
         return await withProcessingJob(request.signal, async () => {
-            const body = await readBoundedJson(request) as ResolveConflictRequest;
-            if (!body || typeof body !== "object") throw new ProcessingError("Invalid conflict request", 400);
-
-            const { conflictId, action } = body;
-
-            if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(conflictId ?? "") || !["SKIP", "KEEP_BOTH", "REPLACE"].includes(action)) {
-                return Response.json(
-                    { error: "Missing conflictId or action" },
-                    { status: 400 }
-                );
-            }
+            const body = objectBody(await readBoundedJson(request));
+            const id = conflictId(body.conflictId);
+            const action = body.action;
+            if (typeof action !== "string" || !["SKIP", "KEEP_BOTH", "REPLACE"].includes(action)) throw new ApiInputError("Invalid conflict action");
 
             const result = await resolveStagedConflict(
-                conflictId,
-                action
+                id,
+                action as ConflictAction
             );
 
-            return Response.json(result);
+            return Response.json(result.type === "SKIPPED" ? { type: result.type } : { type: result.type, mediaId: result.mediaId });
         });
     } catch (error) {
         return processingErrorResponse(error);
@@ -38,6 +28,6 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
     try {
-        return await withProcessingJob(request.signal, async () => Response.json({ conflicts: await listPendingConflicts() }, { headers: { "Cache-Control": "no-store" } }));
+        return await withProcessingJob(request.signal, async () => Response.json({ conflicts: (await listPendingConflicts()).map(publicImportConflict) }, { headers: { "Cache-Control": "no-store" } }));
     } catch (error) { return processingErrorResponse(error); }
 }

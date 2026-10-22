@@ -1,3 +1,4 @@
+import { publicImportConflict } from "../../scripts/api-dto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -22,7 +23,7 @@ async function queueAdapter(
         console.log(`Job ${jobId} requires conflict resolution:`, result.conflict);
     }
 
-    return result;
+    return result.type === "CONFLICT" ? { ...result, conflict: publicImportConflict(result.conflict) } : result;
 }
 
 async function fileFromPath(filePath: string): Promise<File> {

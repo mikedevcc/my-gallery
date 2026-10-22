@@ -1,4 +1,4 @@
-import type { ImportConflict } from "./import-conflict";
+import type { PublicImportConflict as ImportConflict } from "./import-conflict";
 import type { ProcessFileResult } from "./process-file-result";
 
 type ImportResponse = {

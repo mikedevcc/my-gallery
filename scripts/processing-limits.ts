@@ -1,3 +1,4 @@
+import { safeApiError } from "./api-safety";
 import { positiveInteger } from "./runtime-config";
 import { InvalidMediaPathError } from "./media-paths";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -55,8 +56,6 @@ export function withProcessingJob<T>(signal: AbortSignal | undefined, work: () =
     }));
 }
 export function processingErrorResponse(error: unknown) {
-    const status = error instanceof ProcessingError ? error.status : error instanceof InvalidMediaPathError ? 400 : 500;
-    return Response.json({ error: error instanceof Error ? error.message : "Media operation failed" }, {
-        status, headers: status === 503 ? { "Retry-After": "5" } : {},
-    });
+    const status = error instanceof ProcessingError ? error.status : error instanceof InvalidMediaPathError ? 400 : undefined;
+    return safeApiError(error, "media-processing", { status });
 }

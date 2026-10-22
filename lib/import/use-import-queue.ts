@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { ImportJob } from "./import-job";
 import type {
-    ImportConflict,
+    PublicImportConflict as ImportConflict,
     ConflictAction
 } from "./import-conflict";
 import { createImportJobs } from "./create-import-jobs";

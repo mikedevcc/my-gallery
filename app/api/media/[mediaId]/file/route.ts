@@ -1,3 +1,4 @@
+import { pathId } from "@/scripts/api-safety";
 import { getMediaFileById } from "@/scripts/media-database";
 import { streamMediaFile, mediaErrorResponse, MediaDeliveryError } from "@/scripts/media-stream";
 
@@ -5,10 +6,8 @@ export const runtime = "nodejs";
 type RouteContext = { params: Promise<{ mediaId: string }> };
 
 async function serve(request: Request, context: RouteContext) {
-    const { mediaId } = await context.params;
-    const parsedMediaId = Number(mediaId);
-    if (!Number.isSafeInteger(parsedMediaId) || parsedMediaId <= 0) return mediaErrorResponse(request, new MediaDeliveryError(400, "Invalid media ID"), "Invalid media ID", { json: true });
     try {
+        const parsedMediaId = pathId((await context.params).mediaId);
         const media = await getMediaFileById(parsedMediaId);
         if (!media) return mediaErrorResponse(request, new MediaDeliveryError(404, "Media not found"), "Media not found", { json: true });
         return await streamMediaFile(request, {

@@ -89,7 +89,7 @@ export function UploadControl() {
             {conflict && (
                 <ImportConflictModal
                     conflict={conflict}
-                    incomingFilename={jobs.find(job => job.id === conflict.jobId)?.fileName ?? (conflict.type === "FILENAME" ? conflict.existingPath.split(/[\\/]/).pop() : undefined) ?? "Incoming file"}
+                    incomingFilename={jobs.find(job => job.id === conflict.jobId)?.fileName ?? (conflict.type === "FILENAME" ? conflict.existingFilename : undefined) ?? "Incoming file"}
                     remaining={conflicts.length}
                     bulkRemaining={conflicts.filter(item => item.type === "FILENAME").length}
                     busy={busy}

@@ -152,11 +152,11 @@ test("filesystem read errors and mid-stream storage loss fail the stream and clo
         const broken = mock.method(fs, "open", async (...args: Parameters<typeof fs.open>) => {
             const handle = await open(...args); if (args[0] === target) mock.method(handle, "read", async () => { throw new Error("read failed"); }); return handle;
         });
-        try { const response = await streamMediaFile(request(), selection); await assert.rejects(response.arrayBuffer(), /read failed/); }
+        try { const response = await streamMediaFile(request(), selection); await assert.rejects(response.arrayBuffer(), /stream unavailable/); }
         finally { broken.mock.restore(); }
         assert.equal(state.active.size, 0);
         const response = await streamMediaFile(request(), selection); const reader = response.body!.getReader(); await reader.read();
-        mount.state.mounted = false; await assert.rejects(reader.read(), /storage/i); assert.equal(state.active.size, 0);
+        mount.state.mounted = false; await assert.rejects(reader.read(), /stream unavailable/i); assert.equal(state.active.size, 0);
     });
 }));
 
@@ -243,5 +243,5 @@ test("header construction errors close descriptors, and in-place file changes te
     await fs.truncate(target, 200000);
     const response = await streamMediaFile(request(), selection), reader = response.body!.getReader(); await reader.read();
     await fs.truncate(target, 1);
-    await assert.rejects(reader.read(), /changed during streaming/); assert.equal(state.active.size, 0);
+    await assert.rejects(reader.read(), /stream unavailable/); assert.equal(state.active.size, 0);
 })));

@@ -1,3 +1,4 @@
+import { logApiFailure } from "./api-diagnostics";
 import busboy from "busboy";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -61,7 +62,7 @@ export async function parseUpload(request: Request) {
     } catch (error) {
         // Wait for the writer to close before considering cleanup safe.
         await task;
-        if (staged) await staged.discard().catch(cleanup => console.error("Upload cleanup retained artifacts:", cleanup));
+        if (staged) await staged.discard().catch(cleanup => logApiFailure("upload-cleanup", cleanup));
         if (request.signal.aborted) throw new ProcessingError("Upload cancelled", 408);
         if (deadline.signal.aborted) throw new ProcessingError("Upload deadline exceeded", 408);
         if (failure) throw failure;

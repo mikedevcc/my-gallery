@@ -138,30 +138,13 @@ export async function processStagedMedia(
 
         const exists = await destinationExists(destination);
 
-        console.log("[media-import] Conflict check", {
-            jobId,
-            stagedPath,
-            fileName: imported.file.fileName,
-            dateTaken: imported.media.dateTaken,
-            city: location.city,
-            destination,
-            exists,
-        });
 
         if (exists) {
             const conflictId = path.basename(path.dirname(stagedPath));
 
-            console.log("[media-import] Filename conflict detected", {
-                jobId,
-                conflictId,
-                destination,
-            });
-
             const existingMedia = await findMediaByPath(destination);
 
-            console.log("[media-import] Existing DB media", {
-                existingMedia,
-            });
+            console.info("[media-import] Conflict detected", { conflictId, mediaId: existingMedia?.media_id });
 
             const conflict: ImportConflict = {
                 type: "FILENAME", jobId, conflictId,

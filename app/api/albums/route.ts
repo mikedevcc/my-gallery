@@ -1,74 +1,16 @@
-import {
-    createAlbum,
-    getAlbums,
-} from "@/scripts/media-database"
-
+import { createAlbum, getAlbums } from "@/scripts/media-database";
+import { collectionName, jsonObject, safeApiError } from "@/scripts/api-safety";
+import { publicCollection } from "@/scripts/api-dto";
 
 export async function GET() {
-    try {
-        const albums = await getAlbums();
-
-        return Response.json(albums);
-    }
-    catch (error) {
-        console.error("Request API failed:", error);
-
-        const message =
-            error instanceof Error
-                ? error.message
-                : "Unknown albums error";
-
-        return Response.json(
-            { error: message },
-            { status: 500 },
-        );
-    }
+    try { return Response.json((await getAlbums()).map(row => publicCollection(row, "album"))); }
+    catch (error) { return safeApiError(error, "albums-list"); }
 }
-
-
 export async function POST(request: Request) {
-    const body = await request.json() as {
-        albumName?: string;
-    };
-
-    const albumName = body.albumName?.trim();
-
-    if (!albumName) {
-        return Response.json(
-            { error: "No album name provided" },
-            { status: 400 }
-        );
-    }
-
-    if (albumName.length >= 100) {
-        return Response.json(
-            { error: "Album name too long" },
-            { status: 400 }
-        );
-    }
-
     try {
+        const body = await jsonObject(request);
+        const albumName = collectionName(body.albumName);
         const albumId = await createAlbum(albumName);
-
-        return Response.json(
-            {
-                albumId,
-                albumName,
-            },
-            { status: 200 }
-        );
-    }
-    catch (error) {
-        console.error("Album API failed:", error);
-
-        const message =
-            error instanceof Error
-                ? error.message
-                : "Unknown albums error";
-
-        return Response.json(
-            { error: message },
-            { status: 500 }
-        );
-    }
+        return Response.json({ albumId, albumName }, { status: 200 });
+    } catch (error) { return safeApiError(error, "albums-create"); }
 }

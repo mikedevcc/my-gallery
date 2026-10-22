@@ -1,3 +1,4 @@
+import { logApiFailure } from "./api-diagnostics";
 import { syncParents, syncReplacementPath } from "./replacement-recovery";
 import { assertMediaSegment, assertOriginalMediaPath, assertStagedMediaPath, assertMediaInputPath, canonicalOriginalDestination } from "./media-paths";
 import { acquireResolutionClaim, finishOwnedConflict, type ResolutionClaim } from "./conflict-resolution-lock";
@@ -53,10 +54,7 @@ export async function removeEmptyParentDirectories(
                 continue;
             }
 
-            console.error(
-                `Failed to remove directory ${directoryPath}:`,
-                error
-            );
+            logApiFailure("storage-directory-cleanup", error);
 
             return;
         }
@@ -163,7 +161,7 @@ export async function stageMediaStream(fileName: string, source: Readable, signa
         await storage.assertAvailable(stagedPath);
         return { path: stagedPath, discard, complete };
     } catch (error) {
-        if (directoryIdentity) await discard().catch(cleanup => console.error("Upload cleanup retained artifacts:", cleanup));
+        if (directoryIdentity) await discard().catch(cleanup => logApiFailure("upload-cleanup", cleanup));
         if (signal?.aborted) throw new ProcessingError("Upload cancelled", 408);
         throw error;
     } finally { release(); }
@@ -225,13 +223,7 @@ export async function destinationExists(
             return false;
         }
 
-        console.error(
-            "[media-storage] Failed to access destination:",
-            {
-                destinationPath,
-                error,
-            }
-        );
+        logApiFailure("storage-destination", error);
 
         throw error;
     }

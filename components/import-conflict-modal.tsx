@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import type { ConflictAction, ImportConflict } from "@/lib/import/import-conflict";
+import type { ConflictAction, PublicImportConflict as ImportConflict } from "@/lib/import/import-conflict";
 import { Icon } from "./icons";
 import styles from "./import-conflict-modal.module.css";
 
@@ -25,8 +25,7 @@ export function ImportConflictModal({ conflict, incomingFilename, remaining, bul
     const skipRef = useRef<HTMLButtonElement>(null);
     const titleId = useId();
     const descriptionId = useId();
-    const existingPath = conflict.type === "FILENAME" ? conflict.existingPath : null;
-    const existingFilename = existingPath?.split(/[\\/]/).filter(Boolean).pop() ?? `Media #${conflict.existingMediaId}`;
+    const existingFilename = conflict.type === "FILENAME" ? conflict.existingFilename : `Media #${conflict.existingMediaId}`;
 
     useEffect(() => {
         const dialog = dialogRef.current;
@@ -83,7 +82,7 @@ export function ImportConflictModal({ conflict, incomingFilename, remaining, bul
                     <section className={styles.card} aria-label="Existing file">
                         <h3>Existing</h3>
                         <ConflictPreview conflictId={conflict.conflictId} side="existing" filename={existingFilename} onOpen={() => setExpanded("existing")} />
-                        <div className={styles.details}><strong>{existingFilename}</strong><span>{existingPath?.split(/[\\/]/).filter(Boolean).slice(-3, -1).join(" / ") ?? "Already in your library"}</span></div>
+                        <div className={styles.details}><strong>{existingFilename}</strong><span>Already in your library</span></div>
                     </section>
                 </div>
                 {error && <p className={styles.error} role="alert">{error}</p>}

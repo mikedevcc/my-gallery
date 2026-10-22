@@ -1,3 +1,5 @@
+import { logApiFailure } from "./api-diagnostics";
+import { ApiInputError } from "./api-safety";
 import { assertOriginalMediaPath, assertStagedMediaPath, InvalidMediaPathError } from "./media-paths";
 import fs, { type FileHandle } from "node:fs/promises";
 import { constants } from "node:fs";
@@ -109,7 +111,7 @@ export function singleByteRange(header: string | null, size: number): { start: n
 }
 
 function disposition(fileName: string) {
-    const name = path.basename(fileName);
+    const name = path.win32.basename(path.basename(fileName));
     const fallback = name.replace(/[^\x20-\x7e]|["\\;]/g, "_");
     // encodeURIComponent rejects lone surrogates rather than constructing unsafe headers.
     const encoded = encodeURIComponent(name).replace(/['()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
@@ -159,7 +161,9 @@ function fileBody(handle: FileHandle, storage: ValidatedStorage, stat: BigIntSta
                     if (!cancelled) controller.close();
                 }
             } catch (error) {
-                try { await close(); } finally { if (!cancelled) controller.error(error); }
+                logApiFailure("media-stream", error);
+                try { await close(); } catch (cleanup) { logApiFailure("media-stream-close", cleanup); }
+                if (!cancelled) controller.error(new Error("Media stream unavailable"));
             }
         },
         async cancel() { cancelled = true; await close(); },
@@ -216,13 +220,14 @@ export async function streamMediaFile(request: Request, selection: MediaStreamSe
 }
 
 export function mediaErrorResponse(request: Request, error: unknown, fallback = "Media unavailable", options: { defaultStatus?: number; json?: boolean } = {}) {
+    const requestId = logApiFailure("media-delivery", error);
     const code = (error as NodeJS.ErrnoException)?.code;
-    const status = error instanceof MediaDeliveryError ? error.status
+    const status = error instanceof ApiInputError ? 400 : error instanceof MediaDeliveryError ? error.status
         : error instanceof InvalidMediaPathError ? 404
         : error instanceof DestinationBusyError || error instanceof DestinationRecoveryError || error instanceof StorageUnavailableError ? 503
         : ["ENOENT", "ENOTDIR", "ELOOP"].includes(code ?? "") ? 404 : options.defaultStatus ?? 500;
     const body = options.json ? JSON.stringify({ error: fallback }) : fallback;
-    const headers: Record<string, string> = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+    const headers: Record<string, string> = { "X-Request-ID": requestId, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
         "Content-Type": options.json ? "application/json" : "text/plain; charset=utf-8", "Content-Length": String(Buffer.byteLength(body)) };
     if (status === 503) headers["Retry-After"] = "1";
     return new Response(request.method === "HEAD" ? null : body, { status, headers });

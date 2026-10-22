@@ -1,9 +1,10 @@
+import { safeApiError } from "./api-safety";
 import type { PoolClient } from "pg";
 
 export class CollectionIntegrityError extends Error {
     constructor(message: string, public readonly status = 409, public readonly mediaIds: number[] = []) { super(message); }
 }
-export function collectionIds(values: number[]): number[] {
+export function collectionIds(values: unknown): number[] {
     if (!Array.isArray(values) || !values.length || values.some(id => !Number.isSafeInteger(id) || id < 1 || id > 2147483647)) {
         throw new CollectionIntegrityError("Select valid media IDs", 400);
     }
@@ -52,7 +53,6 @@ export async function repairAlbumCovers(client: PoolClient, ids: number[]) {
     )`, [ids]);
 }
 export function collectionErrorResponse(error: unknown): Response {
-    if (error instanceof SyntaxError) return Response.json({ error: "Malformed JSON request" }, { status: 400 });
-    if (error instanceof CollectionIntegrityError) return Response.json({ error: error.message, mediaIds: error.mediaIds }, { status: error.status });
-    throw error; // Preserve framework handling of unexpected database failures.
+    if (error instanceof CollectionIntegrityError) return safeApiError(error, "collection-membership", { status: error.status, mediaIds: error.mediaIds });
+    return safeApiError(error, "collection-membership");
 }

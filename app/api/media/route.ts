@@ -1,24 +1,11 @@
-import { 
-    getAvailableMedia,
-    getLibraryMedia,
-} from "@/scripts/media-database"
+import { getAvailableMedia, getLibraryMedia } from "@/scripts/media-database";
+import { safeApiError } from "@/scripts/api-safety";
+import { publicMedia } from "@/scripts/api-dto";
 
-export async function GET(
-    request: Request
-) {
-    const url = new URL(request.url);
-    const scope = url.searchParams.get("scope");
-    
-    if (scope === "all") {
-        const media = await getLibraryMedia();
-
-        return Response.json(media);
-    }
-
-    const media = await getAvailableMedia()
-
-    return Response.json(
-        media,
-        { status: 200 }
-    )
+export async function GET(request: Request) {
+    try {
+        const scope = new URL(request.url).searchParams.get("scope");
+        const media = scope === "all" ? await getLibraryMedia() : await getAvailableMedia();
+        return Response.json(media.map(publicMedia));
+    } catch (error) { return safeApiError(error, "media-list"); }
 }

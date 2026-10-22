@@ -1,3 +1,4 @@
+import { pathId } from "@/scripts/api-safety";
 import { processingErrorResponse } from "@/scripts/processing-limits";
 import { readStorageFile } from "@/scripts/storage-safety";
 
@@ -14,30 +15,10 @@ export async function GET(
     _request: Request,
     context: RouteContext
 ) {
-    const { mediaId } = await context.params;
-
-    const parsedMediaId = Number(mediaId);
-
-    if (
-        !Number.isInteger(parsedMediaId) ||
-        parsedMediaId <= 0
-    ) {
-        return Response.json(
-            { error: "Invalid media ID" },
-            { status: 400 }
-        );
-    }
-
-    const media = await getMediaFileById(parsedMediaId);
-
-    if (!media) {
-        return Response.json(
-            { error: "Media not found" },
-            { status: 404 }
-        );
-    }
-
     try {
+        const parsedMediaId = pathId((await context.params).mediaId);
+        const media = await getMediaFileById(parsedMediaId);
+        if (!media) return Response.json({ error: "Media not found" }, { status: 404 });
         const thumbnailPath =
             await getOrCreateThumbnail(
                 media.media_id,
@@ -58,11 +39,6 @@ export async function GET(
         });
     }
     catch (error) {
-        console.error(
-            `Failed to read thumbnail for media ${parsedMediaId}:`,
-            error
-        );
-
         return processingErrorResponse(error);
     }
 }

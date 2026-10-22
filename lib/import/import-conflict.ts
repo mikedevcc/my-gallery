@@ -21,3 +21,8 @@ export type HashConflict = {
 export type ImportConflict =
     | FilenameConflict
     | HashConflict;
+
+// Browser/API contract. Internal pending conflicts retain existingPath for recovery.
+export type PublicImportConflict =
+    | (Omit<FilenameConflict, "existingPath"> & { existingFilename: string })
+    | HashConflict;

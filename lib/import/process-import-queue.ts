@@ -1,5 +1,5 @@
 import type { ImportJob } from "./import-job";
-import type { ImportConflict } from "./import-conflict";
+import type { PublicImportConflict as ImportConflict } from "./import-conflict";
 
 
 type ProcessFileResult =
