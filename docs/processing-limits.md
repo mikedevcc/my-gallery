@@ -31,11 +31,14 @@ Other fixed bounds: one file and one jobId field, jobId at most 1024 bytes;
 JSON mutation bodies use the shared [JSON request limits](json-request-limits.md)
 (conflict defaults remain 4096 bytes within 10 seconds); reverse geocoding defaults to
 10 seconds with at most 64 KiB of response JSON. Its URL, mode and timeout are
-configured as described in [production deployment](deployment.md). Multipart headers also have Busboy's bounded header parser. Existing
-accepted file extensions are unchanged; unsupported extensions return 415.
+configured as described in [production deployment](deployment.md). Multipart
+headers also have Busboy's bounded header parser. The shared
+[format policy](media-formats.md) defines accepted extensions and pre-publication
+decoder checks; unsupported/invalid media returns 415.
 Oversized requests/files return 413, malformed input 400, cancellation/upload
 timeouts 408, unavailable capacity 503, insufficient free disk 507, failed tools
-or excessive tool output 422, and subprocess deadlines 504. Tool stderr is consumed
+or excessive tool output 422 (format-admission failures are 415), and subprocess
+deadlines 504. Tool stderr is consumed
 within the output ceiling and not sent to clients. Storage/path/DB errors retain
 their existing failure handling (normally 500).
 

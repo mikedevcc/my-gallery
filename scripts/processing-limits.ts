@@ -2,7 +2,7 @@ import { safeApiError } from "./api-safety";
 import { positiveInteger } from "./runtime-config";
 import { InvalidMediaPathError } from "./media-paths";
 import { AsyncLocalStorage } from "node:async_hooks";
-import path from "node:path";
+import { mediaFormat, unsupportedMediaMessage } from "../lib/media-formats";
 
 export class ProcessingError extends Error {
     constructor(message: string, public readonly status = 503) { super(message); }
@@ -30,8 +30,8 @@ export function processingLimits() {
     };
 }
 export function assertSupportedUpload(name: string) {
-    if (!/\.(jpg|jpeg|png|gif|svg|heif|tiff|raw|webp|avif|mp4|mov|avi|mkv|webm|wmv)$/i.test(path.extname(name))) {
-        throw new ProcessingError("Unsupported media extension", 415);
+    if (!mediaFormat(name)) {
+        throw new ProcessingError(unsupportedMediaMessage, 415);
     }
 }
 // No waiting queue: overloaded callers must retry, rather than retain request bodies.

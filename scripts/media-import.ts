@@ -1,3 +1,6 @@
+import { mediaFormat, unsupportedMediaMessage } from "../lib/media-formats";
+import { validateMediaContents } from "./media-format-validation";
+import { ProcessingError } from "./processing-limits";
 import { captureDateFromExif } from "../lib/media-capture-date";
 import { assertMediaInputPath } from "./media-paths";
 import "dotenv/config";
@@ -72,8 +75,7 @@ export type ImportedMedia = {
 };
 
 
-const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".svg", ".heif", ".tiff", ".raw", ".webp", ".avif"];
-const videoExtensions = [".mp4", ".mov", ".avi", ".mkv", ".webm", ".wmv"];
+
 
 
 function getNumber(
@@ -133,11 +135,9 @@ async function runExifTool(
 }
 
 
-async function readMediaMetadataExif(
-    filePath: string
-): Promise<MediaMetadata> {
-    const args = ["-json", "-n"];
-    const metadata = await runExifTool(filePath, args);
+function readMediaMetadataExif(
+    metadata: ExifData
+): MediaMetadata {
 
     return {
         ...captureDateFromExif(metadata),
@@ -170,18 +170,9 @@ async function inspectMediaFile(
         throw new Error("Path is not a file.");
     }
     
-    // validate and determine file type
-    let fileType: "IMAGE" | "VIDEO";
-
-    if (imageExtensions.includes(extension)) {
-        fileType = "IMAGE";
-    }
-    else if (videoExtensions.includes(extension)) {
-        fileType = "VIDEO";
-    }
-    else {
-        throw new Error("Unsupported file type");
-    }
+    const format = mediaFormat(fileName);
+    if (!format) throw new ProcessingError(unsupportedMediaMessage, 415);
+    const fileType = format.kind;
 
     return {
         fileName,
@@ -255,10 +246,22 @@ export async function importMedia(
     const mediaFileInfo = await inspectMediaFile(filePath);
 
     const absolutePath = mediaFileInfo.absolutePath;
-    
+    let metadata: ExifData;
+    try {
+        metadata = await runExifTool(absolutePath, ["-json", "-n"]);
+    } catch (error) {
+        if (error instanceof ProcessingError && error.status === 422) throw new ProcessingError(unsupportedMediaMessage, 415);
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new ProcessingError("Media metadata tool unavailable", 503);
+        throw error;
+    }
+    const storage = await validateStorage();
+    await storage.assertAvailable(absolutePath);
+    await validateMediaContents(absolutePath, mediaFormat(mediaFileInfo.fileName)!, metadata);
+    await storage.assertAvailable(absolutePath);
+
     return {
         file: mediaFileInfo,
-        media: await readMediaMetadataExif(absolutePath),
+        media: readMediaMetadataExif(metadata),
         image: 
             mediaFileInfo.fileType === "IMAGE"
                 ? await readImageExif(absolutePath)

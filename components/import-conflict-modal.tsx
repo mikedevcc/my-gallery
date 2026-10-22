@@ -1,5 +1,7 @@
 "use client";
 
+import { mediaFormat } from "@/lib/media-formats";
+
 import { useEffect, useId, useRef, useState } from "react";
 import type { ConflictAction, PublicImportConflict as ImportConflict } from "@/lib/import/import-conflict";
 import { Icon } from "./icons";
@@ -132,8 +134,9 @@ function ConflictPreview({ conflictId, side, filename, onOpen, large = false }: 
 }) {
     const [failedUrl, setFailedUrl] = useState<string | null>(null);
     const url = `/api/import/conflict/preview?id=${encodeURIComponent(conflictId)}&side=${side}`;
-    const video = /\.(mp4|mov|webm)$/i.test(filename);
-    const media = failedUrl === url
+    const format = mediaFormat(filename);
+    const video = format?.kind === "VIDEO";
+    const media = !format?.inlineMime || failedUrl === url
         ? <><Icon name="photos" size={30} /><span>Preview unavailable</span></>
         : video
             ? <video src={url} controls={large} muted={!large} preload="metadata" onError={() => setFailedUrl(url)} />

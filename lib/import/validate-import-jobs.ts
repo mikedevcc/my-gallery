@@ -1,42 +1,11 @@
 import { ImportJob } from "./import-job";
+import { mediaFormat, unsupportedMediaMessage } from "../media-formats";
 
 type ValidationResult = {
     jobId: string;
     valid: boolean;
     error?: string;
 };
-
-
-const imageExtensions = [
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".gif",
-    ".heif",
-    ".tiff",
-    ".webp",
-    ".avif",
-];
-
-const videoExtensions = [
-    ".mp4",
-    ".mov",
-    ".avi",
-    ".mkv",
-    ".webm",
-    ".wmv",
-];
-
-
-function getExtension(fileName: string): string {
-    const lastDot = fileName.lastIndexOf(".");
-
-    if (lastDot === -1) {
-        return "";
-    }
-
-    return fileName.slice(lastDot).toLowerCase();
-}
 
 
 export function validateImportJobs(
@@ -68,17 +37,13 @@ export function validateImportJobs(
             continue;
         }
 
-        const extension = getExtension(file.name);
-
-        const supported =
-            imageExtensions.includes(extension) ||
-            videoExtensions.includes(extension);
+        const supported = mediaFormat(file.name);
 
         if (!supported) {
             results.push({
                 jobId: job.id,
                 valid: false,
-                error: `Unsupported file type: ${extension}`,
+                error: unsupportedMediaMessage,
             });
 
             continue;

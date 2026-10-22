@@ -1,3 +1,4 @@
+import { mediaFormat } from "../lib/media-formats";
 import { logApiFailure } from "./api-diagnostics";
 import { ApiInputError } from "./api-safety";
 import { assertOriginalMediaPath, assertStagedMediaPath, InvalidMediaPathError } from "./media-paths";
@@ -26,11 +27,7 @@ export type MediaStreamSelection = {
 };
 
 export function mediaContentType(fileName: string): string | undefined {
-    const types: Record<string, string> = {
-        ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp",
-        ".gif": "image/gif", ".avif": "image/avif", ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
-    };
-    return types[path.extname(fileName).toLowerCase()];
+    return mediaFormat(fileName)?.inlineMime;
 }
 
 function relativePath(root: string, target: string): string[] {

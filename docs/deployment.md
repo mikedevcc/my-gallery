@@ -127,3 +127,7 @@ application callers; SQL migrations remain authoritative. Development import
 scripts now require explicit media-file arguments. They perform real imports and
 are not offline tests; do not run them as deployment validation. Demonstration
 images/UI data remain separate from this production configuration work.
+
+Supported import extensions, decoder checks and browser-playback limitations are
+defined in [media-formats.md](media-formats.md). Run its real-tool fixture test
+with the service toolchain before provisioning an installation.

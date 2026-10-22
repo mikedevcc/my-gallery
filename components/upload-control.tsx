@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { mediaUploadAccept } from "@/lib/media-formats";
 import type { ConflictAction } from "@/lib/import/import-conflict";
 import { ImportConflictModal } from "./import-conflict-modal";
 import { ImportFeedback } from "./import-feedback";
@@ -83,7 +84,7 @@ export function UploadControl() {
                 ref={inputRef}
                 type="file"
                 multiple
-                accept="image/*,video/*"
+                accept={mediaUploadAccept}
                 onChange={handleFileSelection}
                 hidden
             />

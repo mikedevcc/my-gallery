@@ -1,3 +1,4 @@
+import { unsupportedMediaMessage } from "../media-formats";
 import type { ProcessFileResult } from "./process-file-result";
 import { ImportFailure, importFailure, readConflict, uncertainImport } from "./import-feedback";
 
@@ -11,7 +12,7 @@ export async function uploadImportFile(jobId: string, file: File): Promise<Proce
             throw new ImportFailure("Import processing is unavailable. Nothing was imported; retry when the server is ready.", true);
         }
         if (response.status === 413) throw new ImportFailure("This file exceeds the upload limit. Choose a smaller file.");
-        if (response.status === 415) throw new ImportFailure("This file type is not supported.");
+        if (response.status === 415) throw new ImportFailure(unsupportedMediaMessage);
         const data = await response.json();
         if (response.status === 409 && data?.conflict) return { type: "CONFLICT", conflict: readConflict(data.conflict) };
         if (!response.ok || !Number.isSafeInteger(data?.mediaId) || data.mediaId <= 0) throw new ImportFailure(uncertainImport);

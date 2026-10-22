@@ -1,3 +1,4 @@
+import sharp from "sharp";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -187,7 +188,7 @@ test("resolver wrapper releases a safe preflight claim and preserves staged data
     const unsupported = path.join(job, "incoming.txt"); await fs.rename(staged, unsupported);
     try {
         const { resolveStagedConflict } = await import("./media-import-service");
-        await assert.rejects(resolveStagedConflict(id, "REPLACE"), /Unsupported file type/);
+        await assert.rejects(resolveStagedConflict(id, "REPLACE"), /Unsupported or invalid media/);
         assert.equal(await fs.readFile(unsupported, "utf8"), "incoming"); await assert.rejects(fs.access(marker));
     } finally { checkout.mock.restore(); }
 }));
@@ -211,9 +212,11 @@ for (const ambiguous of [false, true]) {
         const serviceTarget = path.join(root, "Unknown", "Unknown", "incoming.jpg");
         await fs.mkdir(path.dirname(serviceTarget), { recursive: true }); await fs.rename(target, serviceTarget);
         await fs.writeFile(path.join(job, ".conflict.json"), JSON.stringify({ type: "FILENAME", conflictId: id, jobId: "job", existingPath: serviceTarget, existingMediaId: 1 }));
-        // Fixture-only ExifTool emits constant metadata; never inspect actual media.
+        // Fixture-only ExifTool emits constant metadata; decode only generated test media.
+        const incoming = await sharp({ create: { width: 8, height: 8, channels: 3, background: "red" } }).jpeg().toBuffer();
+        await fs.writeFile(staged, incoming);
         const bin = path.join(root, "bin"); await fs.mkdir(bin);
-        await fs.writeFile(path.join(bin, "exiftool"), "#!/bin/sh\nprintf '%s\\n' '[{\"DateTimeOriginal\":\"2026:01:01 00:15:00+08:00\"}]'\n", { mode: 0o700 });
+        await fs.writeFile(path.join(bin, "exiftool"), "#!/bin/sh\nprintf '%s\\n' '[{\"MIMEType\":\"image/jpeg\",\"DateTimeOriginal\":\"2026:01:01 00:15:00+08:00\"}]'\n", { mode: 0o700 });
         const previousPath = process.env.PATH; process.env.PATH = `${bin}:${previousPath ?? ""}`;
         const { Pool } = await import("pg");
         let commitAttempted = false;
@@ -236,8 +239,8 @@ for (const ambiguous of [false, true]) {
             const { resolveStagedConflict } = await import("./media-import-service");
             if (ambiguous) {
                 await assert.rejects(resolveStagedConflict(id, "REPLACE"), DestinationRecoveryError);
-                assert.ok(await fs.stat(marker)); assert.equal(await fs.readFile(staged, "utf8"), "incoming");
-                assert.equal(await fs.readFile(serviceTarget, "utf8"), "incoming");
+                assert.ok(await fs.stat(marker)); assert.deepEqual(await fs.readFile(staged), incoming);
+                assert.deepEqual(await fs.readFile(serviceTarget), incoming);
                 await assert.rejects(acquireDestinationLock(root, serviceTarget), DestinationBusyError);
             } else {
                 assert.deepEqual(await resolveStagedConflict(id, "REPLACE"), { type: "COMPLETED", mediaId: 1 });

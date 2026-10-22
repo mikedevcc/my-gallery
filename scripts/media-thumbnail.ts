@@ -4,6 +4,7 @@ import { withDestinationLock } from "./destination-lock";
 import path from "node:path";
 import fs from "node:fs/promises";
 import sharp from "sharp";
+import { mediaFormat } from "../lib/media-formats";
 import { createStorageDirectory, validateStorage } from "./storage-safety";
 
 import { runMediaSubprocess } from "./media-subprocess";
@@ -71,9 +72,13 @@ async function createThumbnailLocked(
                     await image.toFile(temporary);
                 } finally { signal?.removeEventListener("abort", abort); }
             } else {
+                const format = mediaFormat(mediaPath);
                 await runMediaSubprocess("ffmpeg", [
                     "-nostdin", "-y", "-loglevel", "error", "-threads", "1", "-filter_threads", "1",
-                    "-ss", "1", "-i", mediaPath, "-frames:v", "1",
+                    "-protocol_whitelist", "file,pipe",
+                    ...(format?.demuxers ? ["-format_whitelist", format.demuxers] : []),
+                    // First frame also works for clips shorter than one second.
+                    "-i", mediaPath, "-frames:v", "1",
                     "-vf", "scale=600:-1", "-threads", "1", "-fs", String(processingLimits().thumbnailBytes), temporary,
                 ]);
             }

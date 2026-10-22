@@ -106,3 +106,6 @@ deletion, cancellation, descriptor cleanup and storage loss. They do not connect
 to PostgreSQL or access configured user media. The loopback test needs permission
 to bind a local ephemeral port; child-process regression suites likewise need an
 environment that supports subprocess communication.
+
+The shared [format policy](media-formats.md) now defines MIME selection and new
+import admission. Existing delivery, Range and legacy-file behavior are preserved.
