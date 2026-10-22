@@ -2,6 +2,8 @@
 
 import {
     useState,
+    useRef,
+    useCallback,
     useEffect,
 } from "react";
 
@@ -9,6 +11,8 @@ import Image from 'next/image';
 import Link from "next/link";
 import { useRouter } from 'next/navigation';
 
+import { useBulkMedia } from "../lib/use-bulk-media";
+import { BulkMediaFeedback } from "./bulk-media-feedback";
 import { groupMediaByDate } from '@/lib/media-grouping';
 
 import { Icon } from './icons';
@@ -47,6 +51,10 @@ export function AlbumDetail({
 }: {
     albumId: string;
 }) {
+    const bulkRemoval = useBulkMedia("album-remove", Number(albumId));
+    const live = useRef(false);
+    const loadVersion = useRef(0);
+    const loadingRequest = useRef<AbortController | null>(null);
     const [data, setData] = useState<AlbumResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [thumbnailRevision, setThumbnailRevision] = useState(0);
@@ -92,6 +100,8 @@ export function AlbumDetail({
 
 
     function toggleMediaSelection(mediaId: number) {
+        if (bulkRemoval.busy) return;
+        if (!selectedMediaIds.includes(mediaId)) bulkRemoval.available(mediaId);
         setSelectedMediaIds(current =>
             current.includes(mediaId)
                 ? current.filter(id => id !== mediaId)
@@ -101,126 +111,57 @@ export function AlbumDetail({
 
 
 
-    async function refreshAlbum() {
-        setError(null);
-
+    const refreshAlbum = useCallback(async () => {
+        const version = ++loadVersion.current;
+        loadingRequest.current?.abort();
+        const controller = new AbortController();
+        loadingRequest.current = controller;
         try {
-            const response =
-                await fetch(`/api/albums/${albumId}`);
-
-            if (!response.ok) {
-                throw new Error(
-                    `Failed to load album (${response.status})`
-                );
-            }
-
+            const response = await fetch(`/api/albums/${albumId}`, { signal: controller.signal, cache: 'no-store' });
+            if (!response.ok) throw new Error();
             const result = await response.json() as AlbumResponse;
-
-            setData(result);
+            if (live.current && version === loadVersion.current) { setData(result); setError(null); }
+        } catch {
+            if (live.current && version === loadVersion.current) setError("Could not refresh this album. Reload the page to verify its current contents.");
+        } finally {
+            if (live.current && version === loadVersion.current) setLoading(false);
         }
-        catch (error) {
-            setError(
-                error instanceof Error
-                    ? error.message
-                    : 'Failed to load album'
-            );
-        }
-    }
-
-    
-    async function removeSelectedFromAlbum() {
-        if (validSelectedMediaIds.length === 0) {
-            return;
-        }
-
-        const confirmed = window.confirm(
-            `Remove ${validSelectedMediaIds.length} selected item${
-                validSelectedMediaIds.length === 1 ? '' : 's'
-            } from this album?`
-        );
-
-        if (!confirmed) {
-            return;
-        }
-
-        try {
-            for (const mediaId of validSelectedMediaIds) {
-                const response = await fetch(
-                    `/api/albums/${album.album_id}/media`,
-                    {
-                        method: 'DELETE',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            mediaId,
-                        }),
-                    }
-                );
-
-                if (!response.ok) {
-                    throw new Error(
-                        `Failed to remove media ${mediaId}`
-                    );
-                }
-            }
-
-            setSelectedMediaIds([]);
-            await refreshAlbum();
-        }
-        catch (error) {
-            console.error(
-                'Failed to remove media from album:',
-                error
-            );
-        }
-    }
-    
-    
-    useEffect(() => {
-        let version = 0;
-        let active = true;
-        async function loadAlbum() {
-            const current = ++version;
-            try {
-                const response =
-                    await fetch(`/api/albums/${albumId}`);
-
-                if (!response.ok) {
-                    throw new Error(
-                        `Failed to load album (${response.status})`
-                    );
-                }
-
-                const result =
-                    await response.json() as AlbumResponse;
-
-                if (active && current === version) { setData(result); setError(null); }
-            }
-            catch (error) {
-                if (active && current === version) setError(
-                    error instanceof Error
-                        ? error.message
-                        : 'Failed to load album'
-                );
-            }
-            finally {
-                if (active && current === version) setLoading(false);
-            }
-        }
-
-        void loadAlbum();
-        const updated = () => { setThumbnailRevision(current => current + 1); void loadAlbum(); };
-        window.addEventListener('media-library-updated', updated);
-        return () => { active = false; window.removeEventListener('media-library-updated', updated); };
     }, [albumId]);
+
+    async function removeSelectedFromAlbum() {
+        if (data?.album.album_id !== Number(albumId)) return;
+        if (!bulkRemoval.canRun(validSelectedMediaIds)) return;
+        if (!window.confirm(`Remove ${validSelectedMediaIds.length} selected items from this album?`)) return;
+        await bulkRemoval.run(validSelectedMediaIds, ids => {
+            setSelectedMediaIds(current => current.filter(id => !ids.includes(id)));
+        });
+    }
+
+    const cancelRefresh = useCallback(() => {
+        ++loadVersion.current;
+        loadingRequest.current?.abort();
+    }, []);
+
+    useEffect(() => {
+        live.current = true;
+        let cancelled = false;
+        void Promise.resolve().then(() => { if (!cancelled) void refreshAlbum(); });
+        const updated = () => { setThumbnailRevision(current => current + 1); void refreshAlbum(); };
+        window.addEventListener('media-library-updated', updated);
+        return () => {
+            cancelled = true;
+            live.current = false;
+            cancelRefresh();
+            window.removeEventListener('media-library-updated', updated);
+        };
+    }, [refreshAlbum, cancelRefresh]);
 
 
     if (loading) {
         return <p>Loading album...</p>;
     }
 
-    if (error || !data) {
+    if (!data) {
         return (
             <div className="empty-state">
                 <h2>Unable to load album</h2>
@@ -258,11 +199,13 @@ export function AlbumDetail({
     
     
     function toggleSelectAll() {
+        if (bulkRemoval.busy) return;
         if (allMediaSelected) {
             setSelectedMediaIds([]);
             return;
         }
 
+        media.forEach(item => bulkRemoval.available(item.media_id));
         setSelectedMediaIds(
             media.map(
                 item => item.media_id
@@ -352,6 +295,8 @@ export function AlbumDetail({
     
     return (
         <>
+            {error && <p role="alert">{error}</p>}
+            <BulkMediaFeedback items={bulkRemoval.items} />
             <div className="album-hero">
                 {album.cover_media_id !== null && (
                     <Image
@@ -477,6 +422,7 @@ export function AlbumDetail({
 
                             <button
                                 type="button"
+                                disabled={bulkRemoval.busy || album.album_id !== Number(albumId) || !bulkRemoval.canRun(validSelectedMediaIds)}
                                 onClick={() => {
                                     void removeSelectedFromAlbum();
                                 }}
@@ -632,14 +578,12 @@ export function AlbumDetail({
             )}
 
             <AlbumMediaPicker
+                key={album.album_id}
                 albumId={album.album_id}
                 open={mediaPickerOpen}
                 onClose={() =>
                     setMediaPickerOpen(false)
                 }
-                onAdded={() => {
-                    void refreshAlbum();
-                }}
             />
 
             <AlbumMediaTransferModal
@@ -662,14 +606,14 @@ export function AlbumDetail({
             />
 
             <DeleteMediaModal
+                key={album.album_id}
                 open={deleteModalOpen}
                 mediaIds={validSelectedMediaIds}
                 onClose={() => {
                     setDeleteModalOpen(false);
                 }}
-                onDeleted={() => {
-                    setSelectedMediaIds([]);
-                    void refreshAlbum();
+                onDeleted={ids => {
+                    setSelectedMediaIds(current => current.filter(id => !ids.includes(id)));
                 }}
             />
         </>

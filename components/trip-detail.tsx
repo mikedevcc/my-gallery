@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from 'next/navigation';
 
+import { useBulkMedia } from "../lib/use-bulk-media";
+import { BulkMediaFeedback } from "./bulk-media-feedback";
 import { groupMediaByDate } from '@/lib/media-grouping';
 
 import { Icon } from './icons';
@@ -43,6 +45,10 @@ export function TripDetail({
 }: {
     tripId: string;
 }) {
+    const bulkRemoval = useBulkMedia("trip-remove", Number(tripId));
+    const live = useRef(false);
+    const loadVersion = useRef(0);
+    const loadingRequest = useRef<AbortController | null>(null);
     const [data, setData] = useState<TripResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [thumbnailRevision, setThumbnailRevision] = useState(0);
@@ -85,6 +91,8 @@ export function TripDetail({
 
 
     function toggleMediaSelection(mediaId: number) {
+        if (bulkRemoval.busy) return;
+        if (!selectedMediaIds.includes(mediaId)) bulkRemoval.available(mediaId);
         setSelectedMediaIds(current =>
             current.includes(mediaId)
                 ? current.filter(id => id !== mediaId)
@@ -93,118 +101,50 @@ export function TripDetail({
     }
 
 
-    async function refreshTrip() {
-        setError(null);
-
+    const refreshTrip = useCallback(async () => {
+        const version = ++loadVersion.current;
+        loadingRequest.current?.abort();
+        const controller = new AbortController();
+        loadingRequest.current = controller;
         try {
-            const response =
-                await fetch(`/api/trips/${tripId}`);
-
-            if (!response.ok) {
-                throw new Error(
-                    `Failed to load trip (${response.status})`
-                );
-            }
-
+            const response = await fetch(`/api/trips/${tripId}`, { signal: controller.signal, cache: 'no-store' });
+            if (!response.ok) throw new Error();
             const result = await response.json() as TripResponse;
-
-            setData(result);
+            if (live.current && version === loadVersion.current) { setData(result); setError(null); }
+        } catch {
+            if (live.current && version === loadVersion.current) setError("Could not refresh this trip. Reload the page to verify its current contents.");
+        } finally {
+            if (live.current && version === loadVersion.current) setLoading(false);
         }
-        catch (error) {
-            setError(
-                error instanceof Error
-                    ? error.message
-                    : 'Failed to load trip'
-            );
-        }
-    }
-
+    }, [tripId]);
 
     async function removeSelectedFromTrip() {
-        if (validSelectedMediaIds.length === 0) {
-            return;
-        }
-
-        const confirmed = window.confirm(
-            `Remove ${validSelectedMediaIds.length} selected item${
-                validSelectedMediaIds.length === 1 ? '' : 's'
-            } from this trip?`
-        );
-
-        if (!confirmed) {
-            return;
-        }
-
-        try {
-            for (const mediaId of validSelectedMediaIds) {
-                const response = await fetch(
-                    `/api/trips/${trip.trip_id}/media`,
-                    {
-                        method: 'DELETE',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            mediaId,
-                        }),
-                    }
-                );
-
-                if (!response.ok) {
-                    throw new Error(
-                        `Failed to remove media ${mediaId}`
-                    );
-                }
-            }
-
-            setSelectedMediaIds([]);
-            await refreshTrip();
-        }
-        catch (error) {
-            console.error(
-                'Failed to remove media from trip:',
-                error
-            );
-        }
+        if (data?.trip.trip_id !== Number(tripId)) return;
+        if (!bulkRemoval.canRun(validSelectedMediaIds)) return;
+        if (!window.confirm(`Remove ${validSelectedMediaIds.length} selected items from this trip?`)) return;
+        await bulkRemoval.run(validSelectedMediaIds, ids => {
+            setSelectedMediaIds(current => current.filter(id => !ids.includes(id)));
+        });
     }
 
+    const cancelRefresh = useCallback(() => {
+        ++loadVersion.current;
+        loadingRequest.current?.abort();
+    }, []);
 
     useEffect(() => {
-        let version = 0;
-        let active = true;
-        async function loadTrip() {
-            const current = ++version;
-            try {
-                const response = await fetch(`/api/trips/${tripId}`);
-
-                if (!response.ok) {
-                    throw new Error(
-                        `Failed to load trip (${response.status})`
-                    );
-                }
-
-                const result =
-                    await response.json() as TripResponse;
-
-                if (active && current === version) { setData(result); setError(null); }
-            }
-            catch (error) {
-                if (active && current === version) setError(
-                    error instanceof Error
-                        ? error.message
-                        : 'Failed to load trip'
-                );
-            }
-            finally {
-                if (active && current === version) setLoading(false);
-            }
-        }
-
-        void loadTrip();
-        const updated = () => { setThumbnailRevision(current => current + 1); void loadTrip(); };
+        live.current = true;
+        let cancelled = false;
+        void Promise.resolve().then(() => { if (!cancelled) void refreshTrip(); });
+        const updated = () => { setThumbnailRevision(current => current + 1); void refreshTrip(); };
         window.addEventListener('media-library-updated', updated);
-        return () => { active = false; window.removeEventListener('media-library-updated', updated); };
-    }, [tripId]);
+        return () => {
+            cancelled = true;
+            live.current = false;
+            cancelRefresh();
+            window.removeEventListener('media-library-updated', updated);
+        };
+    }, [refreshTrip, cancelRefresh]);
 
 
     if (loading) {
@@ -216,7 +156,7 @@ export function TripDetail({
     }
 
 
-    if (error || !data) {
+    if (!data) {
         return (
             <div className="empty-state">
                 <h2>Unable to load trip</h2>
@@ -255,11 +195,13 @@ export function TripDetail({
 
 
     function toggleSelectAll() {
+        if (bulkRemoval.busy) return;
         if (allMediaSelected) {
             setSelectedMediaIds([]);
             return;
         }
 
+        media.forEach(item => bulkRemoval.available(item.media_id));
         setSelectedMediaIds(
             media.map(
                 item => item.media_id
@@ -365,6 +307,8 @@ export function TripDetail({
 
     return (
         <>
+            {error && <p role="alert">{error}</p>}
+            <BulkMediaFeedback items={bulkRemoval.items} />
             <div className="trip-hero">
                 {trip.cover_media_id !== null && (
                     <Image
@@ -489,6 +433,7 @@ export function TripDetail({
 
                             <button
                                 type="button"
+                                disabled={bulkRemoval.busy || trip.trip_id !== Number(tripId) || !bulkRemoval.canRun(validSelectedMediaIds)}
                                 onClick={() => {
                                     void removeSelectedFromTrip();
                                 }}
@@ -675,14 +620,14 @@ export function TripDetail({
             />
 
             <DeleteMediaModal
+                key={trip.trip_id}
                 open={deleteModalOpen}
                 mediaIds={validSelectedMediaIds}
                 onClose={() => {
                     setDeleteModalOpen(false);
                 }}
-                onDeleted={() => {
-                    setSelectedMediaIds([]);
-                    void refreshTrip();
+                onDeleted={ids => {
+                    setSelectedMediaIds(current => current.filter(id => !ids.includes(id)));
                 }}
             />
         </>

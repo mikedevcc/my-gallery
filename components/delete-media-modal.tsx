@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useBulkMedia } from "../lib/use-bulk-media";
+import { BulkMediaFeedback } from "./bulk-media-feedback";
 
 type DeleteMediaModalProps = {
     open: boolean;
     mediaIds: number[];
     onClose: () => void;
-    onDeleted: () => void;
+    onDeleted: (confirmedIds: number[]) => void;
 };
 
 export function DeleteMediaModal({
@@ -15,60 +16,10 @@ export function DeleteMediaModal({
     onClose,
     onDeleted,
 }: DeleteMediaModalProps) {
-    const [deleting, setDeleting] =
-        useState(false);
-
-    const [error, setError] =
-        useState<string | null>(null);
-
-    if (!open) {
-        return null;
-    }
-
-    async function deleteMedia() {
-        if (mediaIds.length === 0) {
-            return;
-        }
-
-        setDeleting(true);
-        setError(null);
-
-        try {
-            for (const mediaId of mediaIds) {
-                const response = await fetch(
-                    `/api/media/${mediaId}`,
-                    {
-                        method: 'DELETE',
-                    }
-                );
-
-                if (!response.ok) {
-                    const result =
-                        await response.json() as {
-                            error?: string;
-                        };
-
-                    throw new Error(
-                        result.error ??
-                        `Failed to delete media ${mediaId}`
-                    );
-                }
-            }
-
-            onDeleted();
-            onClose();
-        }
-        catch (error) {
-            setError(
-                error instanceof Error
-                    ? error.message
-                    : 'Failed to delete media'
-            );
-        }
-        finally {
-            setDeleting(false);
-        }
-    }
+    const bulk = useBulkMedia("delete");
+    const deleting = bulk.busy;
+    if (!open) return null;
+    async function deleteMedia() { await bulk.run(mediaIds, onDeleted); }
 
     return (
         <div className="delete-media-backdrop">
@@ -111,11 +62,7 @@ export function DeleteMediaModal({
                         </p>
                     </div>
 
-                    {error && (
-                        <p className="error">
-                            {error}
-                        </p>
-                    )}
+                    <BulkMediaFeedback items={bulk.items} />
 
                 </div>
 
@@ -137,7 +84,7 @@ export function DeleteMediaModal({
                         }}
                         disabled={
                             deleting ||
-                            mediaIds.length === 0
+                            !bulk.canRun(mediaIds)
                         }
                     >
                         {deleting

@@ -5,13 +5,14 @@ import {
     useState,
 } from 'react';
 
+import { useBulkMedia } from "../lib/use-bulk-media";
+import { BulkMediaFeedback } from "./bulk-media-feedback";
 import Image from 'next/image';
 
 type AlbumMediaPickerProps = {
     albumId: number;
     open: boolean;
     onClose: () => void;
-    onAdded: () => void;
 };
 
 type LibraryMedia = {
@@ -30,7 +31,6 @@ export function AlbumMediaPicker({
     albumId,
     open,
     onClose,
-    onAdded,
 }: AlbumMediaPickerProps) {
     const [media, setMedia] =
         useState<LibraryMedia[]>([]);
@@ -41,8 +41,9 @@ export function AlbumMediaPicker({
     const [loading, setLoading] =
         useState(false);
 
-    const [adding, setAdding] =
-        useState(false);
+    const bulk = useBulkMedia("album-add", albumId);
+    const adding = bulk.busy;
+    const { available: markAvailable } = bulk;
 
     const [error, setError] =
         useState<string | null>(null);
@@ -52,6 +53,8 @@ export function AlbumMediaPicker({
             return;
         }
 
+        let active = true;
+        const controller = new AbortController();
         async function loadMedia() {
             setLoading(true);
             setError(null);
@@ -61,8 +64,8 @@ export function AlbumMediaPicker({
                     libraryResponse,
                     albumResponse,
                 ] = await Promise.all([
-                    fetch('/api/media?scope=all'),
-                    fetch(`/api/albums/${albumId}`),
+                    fetch('/api/media?scope=all', { signal: controller.signal, cache: 'no-store' }),
+                    fetch(`/api/albums/${albumId}`, { signal: controller.signal, cache: 'no-store' }),
                 ]);
 
                 if (!libraryResponse.ok) {
@@ -92,31 +95,30 @@ export function AlbumMediaPicker({
                         )
                     );
 
-                setMedia(
-                    library.filter(
-                        item =>
-                            !existingIds.has(item.media_id)
-                    )
-                );
-
-                setSelectedMediaIds([]);
+                if (!active) return;
+                const available = library.filter(item => !existingIds.has(item.media_id));
+                available.forEach(item => markAvailable(item.media_id));
+                setMedia(available);
+                // Preserve failed/uncertain selection even if refreshed rows disappear.
             }
             catch (error) {
-                setError(
+                if (active) setError(
                     error instanceof Error
                         ? error.message
                         : 'Failed to load media'
                 );
             }
             finally {
-                setLoading(false);
+                if (active) setLoading(false);
             }
         }
 
         void loadMedia();
+        return () => { active = false; controller.abort(); };
     }, [
         open,
         albumId,
+        markAvailable,
     ]);
 
     if (!open) {
@@ -126,6 +128,8 @@ export function AlbumMediaPicker({
     function toggleMedia(
         mediaId: number
     ) {
+        if (adding) return;
+        if (!selectedMediaIds.includes(mediaId)) bulk.available(mediaId);
         setSelectedMediaIds(current =>
             current.includes(mediaId)
                 ? current.filter(
@@ -139,58 +143,10 @@ export function AlbumMediaPicker({
     }
 
     async function addSelectedMedia() {
-        if (selectedMediaIds.length === 0) {
-            return;
-        }
-
-        setAdding(true);
-        setError(null);
-
-        try {
-            for (const mediaId of selectedMediaIds) {
-                const response =
-                    await fetch(
-                        `/api/albums/${albumId}/media`,
-                        {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type':
-                                    'application/json',
-                            },
-                            body: JSON.stringify({
-                                mediaId,
-                            }),
-                        }
-                    );
-
-                if (!response.ok) {
-                    const result =
-                        await response.json() as {
-                            error?: string;
-                        };
-
-                    throw new Error(
-                        result.error ??
-                        `Failed to add media ${mediaId}`
-                    );
-                }
-            }
-
-            setSelectedMediaIds([]);
-
-            onAdded();
-            onClose();
-        }
-        catch (error) {
-            setError(
-                error instanceof Error
-                    ? error.message
-                    : 'Failed to add media'
-            );
-        }
-        finally {
-            setAdding(false);
-        }
+        await bulk.run(selectedMediaIds, ids => {
+            setSelectedMediaIds(current => current.filter(id => !ids.includes(id)));
+            setMedia(current => current.filter(item => !ids.includes(item.media_id)));
+        });
     }
 
     return (
@@ -237,6 +193,7 @@ export function AlbumMediaPicker({
                                 <button
                                     key={item.media_id}
                                     type="button"
+                                    disabled={adding}
                                     className={`album-media-option ${
                                         selected
                                             ? 'selected'
@@ -266,6 +223,7 @@ export function AlbumMediaPicker({
                     )}
                 </div>
 
+                <BulkMediaFeedback items={bulk.items} />
                 <div className="album-media-picker-footer">
                     <span>
                         {selectedMediaIds.length}{' '}
@@ -278,8 +236,8 @@ export function AlbumMediaPicker({
                             void addSelectedMedia();
                         }}
                         disabled={
-                            adding ||
-                            selectedMediaIds.length === 0
+                            adding || loading || !!error ||
+                            !bulk.canRun(selectedMediaIds)
                         }
                     >
                         {adding
