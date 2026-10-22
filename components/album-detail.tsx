@@ -49,6 +49,7 @@ export function AlbumDetail({
 }) {
     const [data, setData] = useState<AlbumResponse | null>(null);
     const [loading, setLoading] = useState(true);
+    const [thumbnailRevision, setThumbnailRevision] = useState(0);
     const [error, setError] = useState<string | null>(null);
 
     const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
@@ -177,7 +178,10 @@ export function AlbumDetail({
     
     
     useEffect(() => {
+        let version = 0;
+        let active = true;
         async function loadAlbum() {
+            const current = ++version;
             try {
                 const response =
                     await fetch(`/api/albums/${albumId}`);
@@ -191,21 +195,24 @@ export function AlbumDetail({
                 const result =
                     await response.json() as AlbumResponse;
 
-                setData(result);
+                if (active && current === version) { setData(result); setError(null); }
             }
             catch (error) {
-                setError(
+                if (active && current === version) setError(
                     error instanceof Error
                         ? error.message
                         : 'Failed to load album'
                 );
             }
             finally {
-                setLoading(false);
+                if (active && current === version) setLoading(false);
             }
         }
 
         void loadAlbum();
+        const updated = () => { setThumbnailRevision(current => current + 1); void loadAlbum(); };
+        window.addEventListener('media-library-updated', updated);
+        return () => { active = false; window.removeEventListener('media-library-updated', updated); };
     }, [albumId]);
 
 
@@ -348,7 +355,7 @@ export function AlbumDetail({
             <div className="album-hero">
                 {album.cover_media_id !== null && (
                     <Image
-                        src={`/api/media/${album.cover_media_id}/thumbnail`}
+                        src={`/api/media/${album.cover_media_id}/thumbnail?v=${thumbnailRevision}`}
                         alt={album.album_name}
                         fill
                         unoptimized
@@ -567,7 +574,7 @@ export function AlbumDetail({
                                         }}
                                     >
                                         <Image
-                                            src={`/api/media/${item.media_id}/thumbnail`}
+                                            src={`/api/media/${item.media_id}/thumbnail?v=${thumbnailRevision}`}
                                             alt={item.file_name}
                                             fill
                                             unoptimized

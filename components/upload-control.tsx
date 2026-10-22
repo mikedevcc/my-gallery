@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import type { ConflictAction } from "@/lib/import/import-conflict";
 import { ImportConflictModal } from "./import-conflict-modal";
+import { ImportFeedback } from "./import-feedback";
 import { Icon } from "./icons";
 import { useImportQueue } from "@/lib/import/use-import-queue";
 
@@ -19,6 +20,8 @@ export function UploadControl() {
         isRecovering,
         recoveryError,
         startImport,
+        retryJob,
+        resolutionBlocked,
         resolveConflict,
         resolveAllConflicts,
     } = useImportQueue();
@@ -85,6 +88,8 @@ export function UploadControl() {
                 hidden
             />
 
+            <ImportFeedback jobs={jobs} disabled={isImporting || isRecovering || !!recoveryError || conflicts.length > 0 || busy} onRetry={id => { void retryJob(id); }} />
+            {resolutionBlocked && <span role="alert">Refresh the page to reload pending conflicts before another resolution attempt.</span>}
             {recoveryError && <span role="alert">{recoveryError}</span>}
             {conflict && (
                 <ImportConflictModal
@@ -92,7 +97,7 @@ export function UploadControl() {
                     incomingFilename={jobs.find(job => job.id === conflict.jobId)?.fileName ?? (conflict.type === "FILENAME" ? conflict.existingFilename : undefined) ?? "Incoming file"}
                     remaining={conflicts.length}
                     bulkRemaining={conflicts.filter(item => item.type === "FILENAME").length}
-                    busy={busy}
+                    busy={busy || isImporting || resolutionBlocked}
                     error={error}
                     onResolve={action => { void handleResolution(action); }}
                     onResolveAll={action => { void handleResolution(action, true); }}

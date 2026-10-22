@@ -14,4 +14,5 @@ export type ImportJob = {
     status: ImportStatus;
     progress: number;
     error?: string;
+    retryable?: boolean;
 };

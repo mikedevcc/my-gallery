@@ -1,56 +1,20 @@
-import type { PublicImportConflict as ImportConflict } from "./import-conflict";
 import type { ProcessFileResult } from "./process-file-result";
+import { ImportFailure, importFailure, readConflict, uncertainImport } from "./import-feedback";
 
-type ImportResponse = {
-    message?: string;
-    mediaId?: number;
-    error?: string;
-    conflict?: ImportConflict;
-};
-
-
-export async function uploadImportFile(
-    jobId: string,
-    file: File
-): Promise<ProcessFileResult> {
+export async function uploadImportFile(jobId: string, file: File): Promise<ProcessFileResult> {
     const formData = new FormData();
-
     formData.append("file", file);
     formData.append("jobId", jobId);
-
-    const response =  await fetch("/api/import", {
-        method: "POST",
-        body: formData,
-    });
-
-    const data = await response.json() as ImportResponse;
-
-    if (response.status === 409 && data.conflict) {
-        return {
-            type: "CONFLICT",
-            conflict: data.conflict,
+    try {
+        const response = await fetch("/api/import", { method: "POST", body: formData });
+        if (response.status === 503 && response.headers.get("X-Import-Retry-Safe") === "1") {
+            throw new ImportFailure("Import processing is unavailable. Nothing was imported; retry when the server is ready.", true);
         }
-    }
-
-    if (!response.ok) {
-        throw new Error(
-            data.error ?? `Import failed with status ${response.status}`
-        );
-    }
-
-    console.log(
-        `Job ${jobId} imported as media ID ${data.mediaId}`
-    );
-
-    window.dispatchEvent(
-        new CustomEvent('media-library-updated', {
-            detail: {
-                mediaId: data.mediaId,
-            },
-        })
-    );
-
-    return {
-        type: "COMPLETED",
-    };
+        if (response.status === 413) throw new ImportFailure("This file exceeds the upload limit. Choose a smaller file.");
+        if (response.status === 415) throw new ImportFailure("This file type is not supported.");
+        const data = await response.json();
+        if (response.status === 409 && data?.conflict) return { type: "CONFLICT", conflict: readConflict(data.conflict) };
+        if (!response.ok || !Number.isSafeInteger(data?.mediaId) || data.mediaId <= 0) throw new ImportFailure(uncertainImport);
+        return { type: "COMPLETED" };
+    } catch (error) { throw importFailure(error); }
 }

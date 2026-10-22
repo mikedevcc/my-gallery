@@ -3,6 +3,7 @@
 import {
     useEffect,
     useState,
+    useRef,
 } from 'react';
 
 import { useSearchParams } from 'next/navigation';
@@ -45,6 +46,8 @@ type AlbumApiRow = {
 
 
 export function PhotosPage() {
+    const loadVersion = useRef(0);
+    const [thumbnailRevision, setThumbnailRevision] = useState(0);
     const [media, setMedia] = useState<LibraryMedia[]>([]);
 
     const [loading, setLoading] = useState(true);
@@ -94,6 +97,7 @@ export function PhotosPage() {
 
     useEffect(() => {
         async function loadMedia() {
+            const version = ++loadVersion.current;
             try {
                 const response = await fetch('/api/media?scope=all');
 
@@ -105,17 +109,17 @@ export function PhotosPage() {
 
                 const result = await response.json() as LibraryMedia[];
 
-                setMedia(result);
+                if (version === loadVersion.current) { setMedia(result); setError(null); }
             }
             catch (error) {
-                setError(
+                if (version === loadVersion.current) setError(
                     error instanceof Error
                         ? error.message
                         : 'Failed to load library'
                 );
             }
             finally {
-                setLoading(false);
+                if (version === loadVersion.current) setLoading(false);
             }
         }
 
@@ -125,7 +129,9 @@ export function PhotosPage() {
 
     useEffect(() => {
         function handleLibraryUpdated() {
+            setThumbnailRevision(current => current + 1);
             async function reloadMedia() {
+                const version = ++loadVersion.current;
                 try {
                     const response =
                         await fetch(
@@ -139,7 +145,7 @@ export function PhotosPage() {
                     const result =
                         await response.json() as LibraryMedia[];
 
-                    setMedia(result);
+                    if (version === loadVersion.current) { setMedia(result); setError(null); }
                 }
                 catch (error) {
                     console.error(
@@ -147,6 +153,7 @@ export function PhotosPage() {
                         error
                     );
                 }
+                finally { if (version === loadVersion.current) setLoading(false); }
             }
 
             void reloadMedia();
@@ -283,6 +290,7 @@ export function PhotosPage() {
                             </div>
 
                             <LibraryMediaGrid
+                                revision={thumbnailRevision}
                                 items={items}
                                 density={density}
                                 onToggleFavorite={toggleFavoriteMedia}
@@ -297,6 +305,8 @@ export function PhotosPage() {
 
 
 export function TripsPage() {
+    const loadVersion = useRef(0);
+    const [thumbnailRevision, setThumbnailRevision] = useState(0);
     const [trips, setTrips] = useState<TripApiRow[]>([]);
 
     const [loading, setLoading] = useState(true);
@@ -305,6 +315,7 @@ export function TripsPage() {
 
 
     async function loadTrips() {
+        const version = ++loadVersion.current;
         try {
             const response = await fetch('/api/trips');
 
@@ -316,7 +327,7 @@ export function TripsPage() {
 
             const data = await response.json() as TripApiRow[];
 
-            setTrips(data);
+            if (version === loadVersion.current) setTrips(data);
         }
         catch (error) {
             console.error(
@@ -325,7 +336,7 @@ export function TripsPage() {
             );
         }
         finally {
-            setLoading(false);
+            if (version === loadVersion.current) setLoading(false);
         }
     }
 
@@ -336,6 +347,9 @@ export function TripsPage() {
         }
 
         void initialLoad();
+        const updated = () => { setThumbnailRevision(current => current + 1); void loadTrips(); };
+        window.addEventListener('media-library-updated', updated);
+        return () => window.removeEventListener('media-library-updated', updated);
     }, []);
 
 
@@ -347,7 +361,7 @@ export function TripsPage() {
             count: trip.media_count,
             cover:
                 trip.cover_media_id !== null
-                    ? `/api/media/${trip.cover_media_id}/thumbnail`
+                    ? `/api/media/${trip.cover_media_id}/thumbnail?v=${thumbnailRevision}`
                     : undefined,
         }));
 
@@ -393,6 +407,8 @@ export function TripsPage() {
 
 
 export function AlbumsPage() {
+    const loadVersion = useRef(0);
+    const [thumbnailRevision, setThumbnailRevision] = useState(0);
     const [albums, setAlbums] = useState<AlbumApiRow[]>([]);
 
     const [loading, setLoading] = useState(true);
@@ -401,6 +417,7 @@ export function AlbumsPage() {
 
 
     async function loadAlbums() {
+        const version = ++loadVersion.current;
         try {
             const response = await fetch('/api/albums');
 
@@ -412,7 +429,7 @@ export function AlbumsPage() {
 
             const data = await response.json() as AlbumApiRow[];
 
-            setAlbums(data);
+            if (version === loadVersion.current) setAlbums(data);
         }
         catch (error) {
             console.error(
@@ -421,7 +438,7 @@ export function AlbumsPage() {
             );
         }
         finally {
-            setLoading(false);
+            if (version === loadVersion.current) setLoading(false);
         }
     }
 
@@ -432,6 +449,9 @@ export function AlbumsPage() {
         }
 
         void initialLoad();
+        const updated = () => { setThumbnailRevision(current => current + 1); void loadAlbums(); };
+        window.addEventListener('media-library-updated', updated);
+        return () => window.removeEventListener('media-library-updated', updated);
     }, []);
 
 
@@ -443,7 +463,7 @@ export function AlbumsPage() {
             count: album.media_count,
             cover:
                 album.cover_media_id !== null
-                    ? `/api/media/${album.cover_media_id}/thumbnail`
+                    ? `/api/media/${album.cover_media_id}/thumbnail?v=${thumbnailRevision}`
                     : undefined,
         }));
 
@@ -489,6 +509,8 @@ export function AlbumsPage() {
 
 
 export function FavoritesPage() {
+    const loadVersion = useRef(0);
+    const [thumbnailRevision, setThumbnailRevision] = useState(0);
     const [media, setMedia] = useState<LibraryMedia[]>([]);
 
     const [loading, setLoading] = useState(true);
@@ -499,6 +521,7 @@ export function FavoritesPage() {
 
 
     async function reloadMedia() {
+        const version = ++loadVersion.current;
         try {
             const response =
                 await fetch(
@@ -512,9 +535,10 @@ export function FavoritesPage() {
             const result =
                 await response.json() as LibraryMedia[];
 
-            setMedia(result.filter(item =>
-                item.favorite === true
-            ));
+            if (version === loadVersion.current) {
+                setMedia(result.filter(item => item.favorite === true));
+                setError(null);
+            }
         }
         catch (error) {
             console.error(
@@ -522,6 +546,7 @@ export function FavoritesPage() {
                 error
             );
         }
+        finally { if (version === loadVersion.current) setLoading(false); }
     }
 
 
@@ -565,6 +590,7 @@ export function FavoritesPage() {
 
     useEffect(() => {
         async function loadMedia() {
+            const version = ++loadVersion.current;
             try {
                 const response = await fetch('/api/media?scope=all');
 
@@ -576,19 +602,20 @@ export function FavoritesPage() {
 
                 const result = await response.json() as LibraryMedia[];
 
-                setMedia(result.filter(item => 
-                    item.favorite === true
-                ));
+                if (version === loadVersion.current) {
+                    setMedia(result.filter(item => item.favorite === true));
+                    setError(null);
+                }
             }
             catch (error) {
-                setError(
+                if (version === loadVersion.current) setError(
                     error instanceof Error
                         ? error.message
                         : 'Failed to load library'
                 );
             }
             finally {
-                setLoading(false);
+                if (version === loadVersion.current) setLoading(false);
             }
         }
 
@@ -598,6 +625,7 @@ export function FavoritesPage() {
 
     useEffect(() => {
         function handleLibraryUpdated() {
+            setThumbnailRevision(current => current + 1);
             
 
             void reloadMedia();
@@ -718,6 +746,7 @@ export function FavoritesPage() {
                             </div>
 
                             <LibraryMediaGrid
+                                revision={thumbnailRevision}
                                 items={items}
                                 onToggleFavorite={toggleFavoriteMedia}
                             />

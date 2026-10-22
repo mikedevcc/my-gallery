@@ -1711,3 +1711,9 @@ textarea:focus-visible {
         padding: 0 11px;
     }
 }
+/* Import results remain available while navigating the library. */
+.import-feedback { position: fixed; top: 5rem; right: 1rem; z-index: 50; width: min(30rem, calc(100vw - 2rem)); max-height: 50vh; overflow: auto; padding: 1rem; border: 1px solid var(--line); border-radius: .5rem; background: var(--surface); color: var(--ink); box-shadow: 0 4px 20px #0002; }
+.import-feedback summary { cursor: pointer; }
+.import-feedback ul { padding-left: 1.2rem; }
+.import-feedback li { padding-block: .4rem; overflow-wrap: anywhere; }
+.import-feedback p { margin-block: .25rem; }

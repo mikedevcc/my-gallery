@@ -972,10 +972,12 @@ function formatDuration(
 export function LibraryMediaGrid({
     items,
     density = 'comfortable',
+    revision = 0,
     onToggleFavorite,
 }: {
     items: LibraryMedia[];
     density?: string;
+    revision?: number;
     onToggleFavorite: (
         mediaId: number,
         favoriteState: boolean
@@ -1001,7 +1003,7 @@ export function LibraryMediaGrid({
                         aria-label={`View ${item.file_name}`}
                     >
                         <Image
-                            src={`/api/media/${item.media_id}/thumbnail`}
+                            src={`/api/media/${item.media_id}/thumbnail?v=${revision}`}
                             alt={item.file_name}
                             fill
                             sizes="(max-width: 700px) 50vw, (max-width: 1100px) 33vw, 25vw"

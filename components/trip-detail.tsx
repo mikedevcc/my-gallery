@@ -45,6 +45,7 @@ export function TripDetail({
 }) {
     const [data, setData] = useState<TripResponse | null>(null);
     const [loading, setLoading] = useState(true);
+    const [thumbnailRevision, setThumbnailRevision] = useState(0);
     const [error, setError] = useState<string | null>(null);
 
     const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
@@ -169,7 +170,10 @@ export function TripDetail({
 
 
     useEffect(() => {
+        let version = 0;
+        let active = true;
         async function loadTrip() {
+            const current = ++version;
             try {
                 const response = await fetch(`/api/trips/${tripId}`);
 
@@ -182,21 +186,24 @@ export function TripDetail({
                 const result =
                     await response.json() as TripResponse;
 
-                setData(result);
+                if (active && current === version) { setData(result); setError(null); }
             }
             catch (error) {
-                setError(
+                if (active && current === version) setError(
                     error instanceof Error
                         ? error.message
                         : 'Failed to load trip'
                 );
             }
             finally {
-                setLoading(false);
+                if (active && current === version) setLoading(false);
             }
         }
 
         void loadTrip();
+        const updated = () => { setThumbnailRevision(current => current + 1); void loadTrip(); };
+        window.addEventListener('media-library-updated', updated);
+        return () => { active = false; window.removeEventListener('media-library-updated', updated); };
     }, [tripId]);
 
 
@@ -361,7 +368,7 @@ export function TripDetail({
             <div className="trip-hero">
                 {trip.cover_media_id !== null && (
                     <Image
-                        src={`/api/media/${trip.cover_media_id}/thumbnail`}
+                        src={`/api/media/${trip.cover_media_id}/thumbnail?v=${thumbnailRevision}`}
                         alt={trip.trip_name}
                         fill
                         unoptimized
@@ -585,7 +592,7 @@ export function TripDetail({
                                         }}
                                     >
                                         <Image
-                                            src={`/api/media/${item.media_id}/thumbnail`}
+                                            src={`/api/media/${item.media_id}/thumbnail?v=${thumbnailRevision}`}
                                             alt={item.file_name}
                                             fill
                                             unoptimized

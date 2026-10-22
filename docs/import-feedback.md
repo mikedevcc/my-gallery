@@ -1,0 +1,11 @@
+# Import feedback and refresh
+
+The upload control retains per-file results for the current mounted session. Files can be pending, uploading/processing (indeterminate, not a fabricated percentage), awaiting a conflict decision, imported, failed or skipped. Validation and individual upload failures do not cancel other files. Recovered conflicts are available through the conflict dialog after reloading.
+
+Confirmed uploads emit one `media-library-updated` event per batch. Confirmed resolutions emit one event per action/bulk batch, including successes preceding a later failure. Skips and failed-only batches do not emit success events. Photos, Favorites, Trip/Album lists and detail views subscribe; older fetch responses cannot overwrite newer refresh results. Each event also changes the displayed thumbnail URL revision so replacements refresh already mounted images. Existing mock-data Search/Simple pages remain outside the live-library workflow.
+
+Retry is manual and offered only when the API explicitly confirms rejection **before** its import callback starts (`503` plus `X-Import-Retry-Safe: 1`). The original File and job ID are reused; successful or uncertain jobs cannot enter this retry path. The server must not emit that header after staging/import processing starts. Retained retry Files are released on completion, conflict or nonretryable failure; session results are not persisted across page reloads.
+
+A network failure, malformed response or unconfirmed server error may follow a successful commit. These outcomes are not automatically retried. Check the library and reload pending conflicts before selecting that file again. A failed conflict resolution blocks further resolution attempts until reload; unresolved recovery locks may still require the existing administrator recovery procedure. No client-side retry can provide server-side exactly-once guarantees for manually reselected files.
+
+Tests: `node --import tsx --test scripts/import-feedback.test.ts` uses mocked requests, server admission rejection, queue orchestration and rendered feedback markup. Browser interaction, proxy behavior and visual layout still require a manual smoke test. No database or real media is required.
