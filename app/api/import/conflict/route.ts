@@ -1,6 +1,6 @@
 import { publicImportConflict } from "@/scripts/api-dto";
 import { ApiInputError, conflictId, objectBody } from "@/scripts/api-safety";
-import { readBoundedJson } from "@/scripts/upload-request";
+import { readBoundedJson } from "@/scripts/bounded-json";
 import { withProcessingJob, processingErrorResponse } from "@/scripts/processing-limits";
 import { listPendingConflicts } from "@/scripts/pending-import-conflicts";
 import type { ConflictAction } from "@/lib/import/import-conflict";

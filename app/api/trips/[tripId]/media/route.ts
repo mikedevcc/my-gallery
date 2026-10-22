@@ -7,7 +7,7 @@ type RouteContext = { params: Promise<{ tripId: string }> };
 export async function POST(request: Request, context: RouteContext) {
     try {
         const tripId = pathId((await context.params).tripId);
-        const body = await jsonObject(request);
+        const body = await jsonObject(request, "bulk");
         if (body.mediaId !== undefined && body.mediaIds !== undefined) throw new CollectionIntegrityError("Provide mediaId or mediaIds", 400);
         const ids = body.mediaIds === undefined ? [body.mediaId] : body.mediaIds;
         const addedCount = await addMediaToTrip(collectionIds(ids), tripId);
@@ -28,7 +28,7 @@ export async function DELETE(request: Request, context: RouteContext) {
 export async function PATCH(request: Request, context: RouteContext) {
     try {
         const sourceTripId = pathId((await context.params).tripId);
-        const body = await jsonObject(request);
+        const body = await jsonObject(request, "bulk");
         const ids = collectionIds(body.mediaIds);
         const failed = await moveMediaToTrip(ids, sourceTripId, positiveId(body.targetTripId));
         if (failed.length) throw new CollectionIntegrityError("Selection is no longer part of the source Trip", 409, failed);

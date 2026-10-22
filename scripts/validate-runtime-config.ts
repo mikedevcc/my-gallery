@@ -1,3 +1,4 @@
+import { jsonLimits } from "./bounded-json";
 import { databaseConnectionString, geocoderConfiguration } from "./runtime-config";
 import { storageConfiguration } from "./storage-safety";
 import { processingLimits } from "./processing-limits";
@@ -7,4 +8,5 @@ export function validateRuntimeConfiguration() {
     storageConfiguration();
     geocoderConfiguration();
     processingLimits();
+    jsonLimits();
 }

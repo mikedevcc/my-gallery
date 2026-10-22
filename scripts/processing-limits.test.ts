@@ -1,3 +1,4 @@
+import { JsonRequestError } from "./bounded-json";
 import assert from "node:assert/strict";
 import { test, mock } from "node:test";
 import fs from "node:fs/promises";
@@ -109,8 +110,8 @@ test("upload elapsed-time limit cancels a stalled multipart body", () => fixture
     assert.deepEqual(await stagingFiles(root), []);
 })));
 test("JSON control requests are bounded and malformed JSON is rejected", async () => {
-    await assert.rejects(readBoundedJson(new Request("http://localhost", { method: "POST", body: "x".repeat(4097) })), status(413));
-    await assert.rejects(readBoundedJson(new Request("http://localhost", { method: "POST", body: "{" })), status(400));
+    await assert.rejects(readBoundedJson(new Request("http://localhost", { method: "POST", body: "x".repeat(4097) })), error => error instanceof JsonRequestError && error.status === 413);
+    await assert.rejects(readBoundedJson(new Request("http://localhost", { method: "POST", body: "{" })), error => error instanceof JsonRequestError && error.status === 400);
 });
 test("thumbnail failures leave no published or partial cache; valid image publishes complete output", () => fixture(async root => {
     const file = path.join(root, "image.jpg"); await fs.writeFile(file, "invalid-image");

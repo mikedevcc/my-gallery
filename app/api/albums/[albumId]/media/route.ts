@@ -26,7 +26,7 @@ export async function DELETE(request: Request, context: RouteContext) {
 export async function PATCH(request: Request, context: RouteContext) {
     try {
         const sourceAlbumId = pathId((await context.params).albumId);
-        const body = await jsonObject(request);
+        const body = await jsonObject(request, "bulk");
         const ids = collectionIds(body.mediaIds);
         if (typeof body.operation !== "string" || !["copy", "move"].includes(body.operation)) throw new CollectionIntegrityError("Invalid album operation", 400);
         const affectedCount = await (body.operation === "copy" ? copyMediaToAlbum : moveMediaToAlbum)(ids, sourceAlbumId, positiveId(body.targetAlbumId));

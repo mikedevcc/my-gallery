@@ -71,32 +71,5 @@ export async function parseUpload(request: Request) {
     } finally { clearTimeout(timer); }
 }
 
-export async function readBoundedJson(request: Request) {
-    const length = request.headers.get("content-length");
-    if (length !== null && (!/^\d+$/.test(length) || Number(length) > 4096)) throw new ProcessingError("JSON request too large or invalid Content-Length", 413);
-    if (!request.body) throw new ProcessingError("Missing JSON body", 400);
-    const reader = request.body.getReader();
-    let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; void reader.cancel("JSON deadline").catch(() => {}); }, 10_000);
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    const abort = () => void reader.cancel("Request cancelled").catch(() => {});
-    request.signal.addEventListener("abort", abort, { once: true });
-    try {
-        if (request.signal.aborted) throw new ProcessingError("Request cancelled", 408);
-        while (true) {
-            const result = await reader.read();
-            if (result.done) break;
-            size += result.value.byteLength;
-            if (size > 4096) throw new ProcessingError("JSON request too large", 413);
-            chunks.push(result.value);
-        }
-        if (request.signal.aborted) throw new ProcessingError("Request cancelled", 408);
-        if (timedOut) throw new ProcessingError("JSON request deadline exceeded", 408);
-        try { return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown; }
-        catch { throw new ProcessingError("Invalid JSON", 400); }
-    } finally {
-        clearTimeout(timer); request.signal.removeEventListener("abort", abort);
-        await reader.cancel().catch(() => {}); reader.releaseLock();
-    }
-}
+// Compatibility export for existing conflict request callers.
+export { readBoundedJson } from "./bounded-json";

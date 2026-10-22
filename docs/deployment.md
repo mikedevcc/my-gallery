@@ -70,7 +70,9 @@ A custom endpoint must implement Nominatim's `lat`, `lon`, `format=jsonv2`,
 server-only URL; it is trusted installation configuration, not request input.
 
 All H4/M13 variable names remain unchanged. See [processing limits](processing-limits.md)
-for the full byte, concurrency, pixel, output and deadline defaults. Numeric values
+for the full media byte, concurrency, pixel, output and deadline defaults.
+[JSON request limits](json-request-limits.md) documents the separate `API_JSON_*`
+limits for collection, favorite and conflict mutations; match proxy limits by route. Numeric values
 are positive decimal safe integers; empty strings are invalid, not aliases for
 unset values. Request limits must cover upload limits; upload/subprocess timer
 values must fit Node's 2147483647 ms timer range. No database/storage variable is

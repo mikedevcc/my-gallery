@@ -1,14 +1,12 @@
+import { readBoundedJson, JsonRequestError, type JsonProfile } from "./bounded-json";
 import { logApiFailure } from "./api-diagnostics";
 import { StorageUnavailableError } from "./storage-safety";
 import { DestinationBusyError, DestinationRecoveryError } from "./destination-lock";
 import { RuntimeConfigurationError } from "./runtime-config";
 
 export class ApiInputError extends Error {}
-export async function jsonObject(request: Request): Promise<Record<string, unknown>> {
-    let value: unknown;
-    try { value = await request.json(); }
-    catch { throw new ApiInputError("Malformed JSON request"); }
-    return objectBody(value);
+export async function jsonObject(request: Request, profile: JsonProfile = "single"): Promise<Record<string, unknown>> {
+    return objectBody(await readBoundedJson(request, profile));
 }
 export function objectBody(value: unknown): Record<string, unknown> {
     if (value === null || typeof value !== "object" || Array.isArray(value)) throw new ApiInputError("Expected a JSON object");
@@ -41,7 +39,7 @@ const messages: Record<number, string> = {
 };
 export function safeApiError(error: unknown, context: string, options: { status?: number; mediaIds?: number[] } = {}) {
     const code = (error as NodeJS.ErrnoException | null)?.code;
-    const status = error instanceof ApiInputError ? 400 : options.status
+    const status = error instanceof JsonRequestError ? error.status : error instanceof ApiInputError ? 400 : options.status
         ?? (error instanceof StorageUnavailableError || error instanceof DestinationBusyError || error instanceof DestinationRecoveryError || error instanceof RuntimeConfigurationError ? 503
             : code === "23505" || code === "23503" ? 409
                 : ["22001", "22003", "22P02", "23514"].includes(code ?? "") ? 400 : 500);
