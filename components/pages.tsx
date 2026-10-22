@@ -6,13 +6,11 @@ import {
     useRef,
 } from 'react';
 
-import { useSearchParams } from 'next/navigation';
 
 import type {
     TripCard,
     AlbumCard,
 } from '@/lib/types';
-import { albums, photos, trips } from '@/lib/mock-data';
 import {
     type GroupMode,
     groupMediaByDate
@@ -21,7 +19,6 @@ import {
 import {
     LibraryMediaGrid,
     type LibraryMedia,
-    PhotoGrid,
 } from './gallery';
 import { TripGrid, AlbumGrid } from './cards';
 import { Icon } from './icons';
@@ -54,7 +51,7 @@ export function PhotosPage() {
 
     const [error, setError] = useState<string | null>(null);
 
-    const [density, setDensity] = useState('comfortable');
+    const density = 'comfortable';
 
     const [group, setGroup] = useState<GroupMode>('Months');
 
@@ -757,10 +754,6 @@ export function FavoritesPage() {
         </>
     )
 }
-
-
-export function SearchPage(){const params=useSearchParams();const initial=params.get('q')||'';const [query,setQuery]=useState(initial);const [filter,setFilter]=useState('All');const q=query.toLowerCase().trim();const result=photos.filter(p=>!q||[p.title,p.location?.city,p.location?.country,...p.tags,p.camera?.model].some(s=>s?.toLowerCase().includes(q)));return <><PageHeading eyebrow="DISCOVER" title="Search" subtitle="Find any trip, moment, or memory"/><div className="search-hero"><Icon name="search" size={24}/><input aria-label="Search library" autoFocus value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search photos, trips, or anything..."/><span>↵</span></div><div className="filter-row">{['All','Photos','Trips','Albums','Videos'].map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}</div>{!q&&<div className="suggestions"><span>TRY SEARCHING FOR</span>{['Kyoto temples','Singapore','Sony A7 III','Nature','Iceland'].map(s=><button key={s} onClick={()=>setQuery(s)}><Icon name="search" size={14}/>{s}</button>)}</div>}<div className="results-heading"><h2>{q?`Results for “${query}”`:'Explore your library'}</h2><span>{filter==='All'||filter==='Photos'?result.length:filter==='Trips'?trips.length:filter==='Albums'?albums.length:0} results</span></div>{filter==='Trips'?<TripGrid items={trips.filter(t=>!q||t.name.toLowerCase().includes(q)||t.places.toLowerCase().includes(q))}/>:filter==='Albums'?<AlbumGrid items={albums.filter(a=>!q||a.name.toLowerCase().includes(q))}/>:filter==='Videos'?<EmptyState title="No videos yet" text="Videos will appear here when your library is connected."/>:result.length?<PhotoGrid items={result}/>:<EmptyState title="No matches found" text="Try another trip, subject, or camera name."/>}</>}
-export function SimplePage({kind}:{kind:'Recently Added'|'Videos'|'Screenshots'|'Trash'}){const items=kind==='Recently Added'?photos.slice(0,8):[];return <><PageHeading eyebrow="YOUR LIBRARY" title={kind} subtitle={kind==='Recently Added'?'The newest moments in your library':`${kind} in your library`}/>{items.length?<PhotoGrid items={items}/>:<EmptyState title={`No ${kind.toLowerCase()} yet`} text="Your collection will appear here when your library is connected."/>}</>}
 
 
 function PageHeading({

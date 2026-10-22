@@ -1,2 +1,6 @@
-import {SimplePage} from '@/components/pages';
-export default function Page(){return <SimplePage kind="Recently Added"/>}
+import { notFound } from "next/navigation";
+
+// Retired placeholder route: never render demonstration data in production.
+export default function Page() {
+    notFound();
+}

@@ -10,10 +10,9 @@ import {
 import {
     useEffect,
     useState,
+    useSyncExternalStore,
 } from 'react';
 
-import { photos } from '@/lib/mock-data';
-import type { Photo } from '@/lib/types';
 
 import { Icon } from './icons';
 
@@ -88,76 +87,6 @@ export type LibraryMedia = {
 };
 
 
-export function PhotoGrid({
-    items = photos,
-    density = 'comfortable',
-}: {
-    items?: Photo[];
-    density?: string;
-}) {
-    return (
-        <div
-            className={`photo-grid ${
-                density === 'compact'
-                    ? 'compact'
-                    : ''
-            }`}
-        >
-            {items.map((photo, index) => (
-                <Link
-                    href={`/photo/${photo.id}`}
-                    scroll={false}
-                    className={`photo-tile ${
-                        photo.span === 'wide'
-                            ? 'wide'
-                            : ''
-                    } ${
-                        photo.span === 'tall'
-                            ? 'tall'
-                            : ''
-                    }`}
-                    key={photo.id}
-                    aria-label={`View ${photo.title}`}
-                    style={{
-                        background: photo.color,
-                    }}
-                >
-                    <Image
-                        src={photo.thumbnailSrc}
-                        alt={photo.title}
-                        fill
-                        sizes="(max-width: 700px) 50vw, (max-width: 1100px) 33vw, 25vw"
-                        unoptimized
-                        className="photo-img"
-                        priority={index < 3}
-                    />
-
-                    <span className="photo-overlay">
-                        <span>
-                            {photo.title}
-
-                            <small>
-                                {photo.location?.city}
-                            </small>
-                        </span>
-
-                        <Icon
-                            name="heart"
-                            size={18}
-                            className={
-                                photo.favorite
-                                    ? 'is-favorite'
-                                    : ''
-                            }
-                        />
-                    </span>
-                </Link>
-            ))}
-        </div>
-    );
-}
-
-
 export function Viewer({
     id,
 }: {
@@ -186,9 +115,12 @@ export function Viewer({
     const [favorite, setFavorite] =
         useState(false);
 
-    const [description, setDescription] =
-        useState('');
-
+    const canShare = useSyncExternalStore(
+        () => () => {},
+        () => typeof navigator.share === 'function',
+        () => false,
+    );
+    const [shareError, setShareError] = useState('');
 
     useEffect(() => {
         async function loadMedia() {
@@ -523,21 +455,24 @@ export function Viewer({
                         </button>
 
 
-                        <button
-                            className="viewer-icon"
-                            aria-label="Share media"
-                            onClick={() =>
-                                navigator.share?.({
-                                    title:
-                                        media.file_name,
-                                    url:
-                                        window.location.href,
-                                })
-                            }
-                        >
-                            <Icon name="share"/>
-                        </button>
-
+                        {canShare && (
+                            <button
+                                className="viewer-icon"
+                                aria-label="Share media"
+                                onClick={async () => {
+                                    setShareError('');
+                                    try {
+                                        await navigator.share({ title: media.file_name, url: window.location.href });
+                                    } catch (error) {
+                                        if (!(error instanceof Error && error.name === 'AbortError')) {
+                                            setShareError('Sharing failed. You can download the original to share it.');
+                                        }
+                                    }
+                                }}
+                            >
+                                <Icon name="share"/>
+                            </button>
+                        )}
 
                         <a
                             className="viewer-icon"
@@ -577,6 +512,8 @@ export function Viewer({
 
                 </div>
 
+
+                {shareError && <p role="alert">{shareError}</p>}
 
                 <div className="viewer-stage">
 
@@ -835,31 +772,6 @@ export function Viewer({
                         )}
 
 
-                        <div className="info-divider"/>
-
-
-                        <label
-                            className="info-label"
-                            htmlFor="photo-description"
-                        >
-                            Description
-                        </label>
-
-                        <textarea
-                            id="photo-description"
-                            placeholder="Add a description..."
-                            value={
-                                description
-                            }
-                            onChange={
-                                event =>
-                                    setDescription(
-                                        event
-                                            .target
-                                            .value
-                                    )
-                            }
-                        />
 
                     </div>
 

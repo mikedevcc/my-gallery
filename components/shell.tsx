@@ -1,9 +1,50 @@
 'use client';
+
 import Link from 'next/link';
-import {usePathname,useRouter} from 'next/navigation';
-import {useEffect,useState} from 'react';
-import {Icon} from './icons';
-import {UploadControl} from "./upload-control";
-const primary=[['Photos','/','photos'],['Trips','/trips','trips'],['Albums','/albums','albums'],['Favorites','/favorites','heart']];
-const library=[['Recently Added','/recent','clock'],['Videos','/videos','video'],['Screenshots','/screenshots','photos'],['Trash','/trash','trash']];
-export function Shell({children}:{children:React.ReactNode}){const path=usePathname(),router=useRouter();const [toast,setToast]=useState('');useEffect(()=>{const handler=(e:KeyboardEvent)=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='l'){e.preventDefault();document.getElementById('global-search')?.focus()}};window.addEventListener('keydown',handler);return()=>window.removeEventListener('keydown',handler)},[]);useEffect(()=>{if(toast){const timer=setTimeout(()=>setToast(''),3300);return()=>clearTimeout(timer)}},[toast]);const nav=(items:string[][])=>items.map(([label,url,icon])=><Link key={url} href={url} className={`nav-item ${path===url||url!=='/'&&path.startsWith(url+'/')?'active':''}`}><Icon name={icon} size={18}/><span>{label}</span></Link>);return <div className="app-shell"><aside className="sidebar"><Link href="/" className="brand"><span className="brand-mark"><Icon name="photos" size={20}/></span><span>My Gallery</span></Link><div className="nav-group">{nav(primary)}</div><div className="sidebar-section"><span className="sidebar-caption">LIBRARY</span><div className="nav-group">{nav(library)}</div></div><div className="sidebar-bottom"><div className="storage-title"><span>Storage</span><Icon name="more" size={17}/></div><div className="storage-bar"><span/></div><div className="storage-copy"><strong>3.2 TB</strong> of 8 TB used</div><div className="user"><span className="avatar">MF</span><span><strong>My Library</strong><small>Personal space</small></span><Icon name="more" size={17}/></div></div></aside><div className="main-column"><header className="topbar"><div className="mobile-brand"><span className="brand-mark"><Icon name="photos" size={17}/></span>My Gallery</div><form className="top-search" onClick={()=>{if(window.innerWidth<=760)router.push('/search')}} onSubmit={e=>{e.preventDefault();const form=e.currentTarget;const q=(form.elements.namedItem('q') as HTMLInputElement).value;router.push(`/search?q=${encodeURIComponent(q)}`)}}><Icon name="search" size={18}/><input id="global-search" name="q" placeholder="Search photos, trips, or anything..." aria-label="Search photos"/><kbd>Ctrl L</kbd></form><div className="top-actions"><UploadControl /><button className="top-avatar" aria-label="Profile" onClick={()=>setToast('Personal library preview')} >MF</button></div></header><main className="main-content">{children}</main></div><nav className="mobile-nav" aria-label="Main navigation">{nav([...primary,['Search','/search','search']])}</nav>{toast&&<div className="toast" role="status"><Icon name="sparkle" size={17}/>{toast}</div>}</div>}
+import { usePathname } from 'next/navigation';
+import { Icon } from './icons';
+import { UploadControl } from './upload-control';
+
+// Only implemented, live-data destinations belong in production navigation.
+const navigation = [
+    ['Photos', '/', 'photos'],
+    ['Trips', '/trips', 'trips'],
+    ['Albums', '/albums', 'albums'],
+    ['Favorites', '/favorites', 'heart'],
+];
+
+export function Shell({ children }: { children: React.ReactNode }) {
+    const path = usePathname();
+    const links = () => navigation.map(([label, url, icon]) => {
+        const active = path === url || url !== '/' && path?.startsWith(url + '/');
+        return (
+            <Link key={url} href={url} className={`nav-item ${active ? 'active' : ''}`} aria-current={active ? 'page' : undefined}>
+                <Icon name={icon} size={18} />
+                <span>{label}</span>
+            </Link>
+        );
+    });
+
+    return (
+        <div className="app-shell">
+            <aside className="sidebar">
+                <Link href="/" className="brand">
+                    <span className="brand-mark"><Icon name="photos" size={20} /></span>
+                    <span>My Gallery</span>
+                </Link>
+                <nav className="nav-group" aria-label="Library navigation">{links()}</nav>
+            </aside>
+            <div className="main-column">
+                <header className="topbar">
+                    <div className="mobile-brand">
+                        <span className="brand-mark"><Icon name="photos" size={17} /></span>
+                        My Gallery
+                    </div>
+                    <div className="top-actions"><UploadControl /></div>
+                </header>
+                <main className="main-content">{children}</main>
+            </div>
+            <nav className="mobile-nav" aria-label="Main navigation">{links()}</nav>
+        </div>
+    );
+}

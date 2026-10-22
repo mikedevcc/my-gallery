@@ -1,3 +1,6 @@
-import {Suspense} from 'react';
-import {SearchPage} from '@/components/pages';
-export default function Page(){return <Suspense><SearchPage/></Suspense>}
+import { notFound } from "next/navigation";
+
+// Retired placeholder route: never render demonstration data in production.
+export default function Page() {
+    notFound();
+}

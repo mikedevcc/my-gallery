@@ -7,7 +7,7 @@ Before using media storage, follow [Debian storage provisioning and validation](
 `MEDIA_STORAGE_ROOT`, `MEDIA_STORAGE_UUID`, and `MEDIA_STORAGE_ID` are required;
 the application does not create the storage root or installation marker.
 
-A self-hosted personal photo library built with Next.js App Router, React, TypeScript, PostgreSQL, and Tailwind CSS. Some UI sections still use demonstration data.
+A self-hosted personal photo library built with Next.js App Router, React, TypeScript, PostgreSQL, and Tailwind CSS. Production navigation exposes only implemented, live-data views.
 
 ## Run
 
@@ -20,17 +20,19 @@ Open http://localhost:3000. Use `npm run lint` and `npm run build` to check the 
 
 ## Structure
 
-- `app/` contains the main routes: Photos, Trips and trip details, Albums, Favorites, Search, and library sections. `app/photo/[id]` is the immersive viewer route.
-- `components/shell.tsx` provides desktop navigation, mobile navigation, top search, storage status, and the upload preview action.
+- `app/` contains the main routes: Photos, Trips and trip details, Albums and album details, and Favorites. `app/photo/[id]` is the immersive viewer route.
+- `components/shell.tsx` provides desktop/mobile navigation and the working import control.
 - `components/gallery.tsx` provides the reusable photo grid and keyboard accessible viewer with filmstrip and information panel.
 - `components/cards.tsx`, `components/pages.tsx`, and `components/trip-detail.tsx` provide collection cards and page content.
 - `components/icons.tsx` contains small local SVG icons.
-- `lib/types.ts` defines Photo, Trip, and Album. `lib/mock-data.ts` supplies the demonstration records.
+- `lib/types.ts` contains UI types. `lib/mock-data.ts` is a retained development fixture and is not imported by production components.
 
-## Connecting a real library
+## Production interface
 
-Replace the exported arrays in `lib/mock-data.ts` with server-side data fetching at the route level, keeping the types in `lib/types.ts` as the UI contract. Add upload, favorite, tagging, and description API calls behind the existing controls. For large libraries, paginate timeline results and virtualize or incrementally load gallery sections.
-
-`Photo.thumbnailSrc` is used by grids and the filmstrip; `Photo.src` is used by the viewer. Point both to your NAS media endpoint, with separately generated thumbnail and display-size URLs. Add its host to `images.remotePatterns` in `next.config.ts`. Keep originals behind authenticated download endpoints when connecting a private library.
-
-The current images are Unsplash development URLs. They need a network connection to display. Upload and collection creation are preview actions. Icons are local SVGs because the package registry was unavailable in the build environment.
+Photos, Trips, Albums, Favorites, imports and Viewer use the existing real APIs.
+Search, Recently Added, Videos, Screenshots and Trash are deferred and their old
+routes return 404. Videos remain available within the working library and collections.
+Fabricated storage totals, the demo profile action and nonpersistent description
+editing are removed. Native sharing appears only on browsers that support it.
+See [production interface scope](docs/production-interface.md) for deferred features
+and verification limitations.
