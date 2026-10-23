@@ -1137,7 +1137,6 @@ function formatDuration(
 
 export function LibraryMediaGrid({
     items,
-    density = 'comfortable',
     revision = 0,
     onToggleFavorite,
     selectedMediaIds = [],
@@ -1145,7 +1144,6 @@ export function LibraryMediaGrid({
     scope = 'all',
 }: {
     items: LibraryMedia[];
-    density?: string;
     revision?: number;
     onToggleFavorite: (
         mediaId: number,
@@ -1158,11 +1156,7 @@ export function LibraryMediaGrid({
     const selectedIds = new Set(selectedMediaIds);
 
     return (
-        <div
-            className={`photo-grid ${
-                density === 'compact' ? 'compact' : ''
-            }`}
-        >
+        <div className="photo-grid">
             {items.map((item, index) => {
                 const selected = selectedIds.has(item.media_id);
 

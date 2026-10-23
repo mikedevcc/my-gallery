@@ -64,8 +64,6 @@ export function PhotosPage() {
 
     const [error, setError] = useState<string | null>(null);
 
-    const density = 'comfortable';
-
     const [group, setGroup] = usePersistedGroup<GroupMode>(
         'my-gallery:photos:timeline-group',
         'Months',
@@ -377,7 +375,6 @@ export function PhotosPage() {
                                 scope="all"
                                 revision={thumbnailRevision}
                                 items={items}
-                                density={density}
                                 onToggleFavorite={toggleFavoriteMedia}
                                 selectedMediaIds={selectedMediaIds}
                                 onToggleSelection={toggleSelection}
