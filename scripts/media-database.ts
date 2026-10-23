@@ -1155,7 +1155,7 @@ export async function getMediaByAlbumId(
                 m.date_imported,
                 m.width,
                 m.height,
-                m.favorite
+                m.favorite,
                 m.file_modified_at,
                 m.file_modified_timezone
              FROM media m
