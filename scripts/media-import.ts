@@ -74,6 +74,7 @@ export type ImportedMedia = {
     video?: VideoMetadata;
 
     fileModifiedAt?: Date | null;
+    fileModifiedTimezone?: string | null;
 };
 
 

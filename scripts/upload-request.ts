@@ -17,7 +17,15 @@ export async function parseUpload(request: Request) {
     let parser: ReturnType<typeof busboy>;
     try {
         parser = busboy({ headers: { "content-type": type }, preservePath: true, defParamCharset: "utf8",
-            limits: { fileSize: limits.uploadBytes + 1, files: 1, fields: 2, parts: 4, fieldSize: 1024, fieldNameSize: 64, headerPairs: 32 } });
+            limits: {
+                fileSize: limits.uploadBytes + 1,
+                files: 1,
+                fields: 3,
+                parts: 5,
+                fieldSize: 1024,
+                fieldNameSize: 64,
+                headerPairs: 32
+            } });
     } catch { throw new ProcessingError("Invalid multipart boundary", 400); }
     const deadline = new AbortController();
     const timer = setTimeout(() => deadline.abort(), limits.uploadMs);
@@ -34,6 +42,8 @@ export async function parseUpload(request: Request) {
     let staged: Awaited<ReturnType<typeof stageMediaStream>> | undefined;
     let task: Promise<void> | undefined;
     let failure: unknown;
+    let fileModifiedTimezone: string | null = null;
+    let receivedFileModifiedTimezone = false;
     const fail = (error: unknown) => {
         failure ??= error;
         // Destroy outside busboy's event handler; its parser must finish the current callback.
@@ -92,6 +102,36 @@ export async function parseUpload(request: Request) {
             return;
         }
 
+        if (name === "fileModifiedTimezone") {
+            if (receivedFileModifiedTimezone) {
+                fail(new ProcessingError("Duplicate file timezone", 400));
+                return;
+            }
+
+            receivedFileModifiedTimezone = true;
+
+            try {
+                if (
+                    !value ||
+                    value.length > 128 ||
+                    !/^[A-Za-z0-9_+\-/]+$/.test(value)
+                ) {
+                    throw new Error("Invalid timezone");
+                }
+
+                const canonicalTimezone =
+                    new Intl.DateTimeFormat("en-US", {
+                        timeZone: value,
+                    }).resolvedOptions().timeZone;
+
+                fileModifiedTimezone = canonicalTimezone;
+            } catch {
+                fail(new ProcessingError("Invalid file timezone", 400));
+            }
+
+            return;
+        }
+
         fail(new ProcessingError("Unexpected upload field", 400));
     });
 
@@ -111,6 +151,7 @@ export async function parseUpload(request: Request) {
                 fileLastModified === null
                     ? null
                     : new Date(fileLastModified),
+            fileModifiedTimezone,
         };
     } catch (error) {
         // Wait for the writer to close before considering cleanup safe.

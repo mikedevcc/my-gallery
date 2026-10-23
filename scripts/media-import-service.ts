@@ -116,6 +116,7 @@ export async function processStagedMedia(
     stagedPath: string,
     jobId: string,
     fileLastModified: Date | null = null,
+    fileModifiedTimezone: string | null = null,
 ): Promise<ServerImportResult> {
     assertStagedMediaPath(getMediaStorageRoot(), stagedPath);
     const storage = await validateStorage();
@@ -125,6 +126,7 @@ export async function processStagedMedia(
         checkProcessingCancellation();
         const imported = await importMedia(stagedPath);
         imported.fileModifiedAt = fileLastModified;
+        imported.fileModifiedTimezone = fileModifiedTimezone;
 
         const { latitude, longitude } = imported.media;
 
@@ -153,7 +155,12 @@ export async function processStagedMedia(
                 existingMediaId: existingMedia?.media_id,
                 existingPath: destination,
             };
-            await savePendingConflict(stagedPath, conflict);
+            await savePendingConflict(
+                stagedPath,
+                conflict,
+                fileLastModified,
+                fileModifiedTimezone,
+            );
             return { type: "CONFLICT", conflict };
         }
 
@@ -203,6 +210,7 @@ async function applyStagedConflictResolution(
             checkProcessingCancellation();
             const imported = await importMedia(stagedPath);
             imported.fileModifiedAt = claim.fileModifiedAt ?? null;
+            imported.fileModifiedTimezone = claim.fileModifiedTimezone ?? null;
         
             const { latitude, longitude } = imported.media;
 
@@ -235,6 +243,7 @@ async function applyStagedConflictResolution(
         checkProcessingCancellation();
         const imported = await importMedia(stagedPath);
         imported.fileModifiedAt = claim.fileModifiedAt ?? null;
+        imported.fileModifiedTimezone = claim.fileModifiedTimezone ?? null;
     
         const { latitude, longitude } = imported.media;
 

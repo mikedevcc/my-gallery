@@ -30,6 +30,7 @@ type MediaDetails = {
     height: number | null;
     favorite: boolean;
     file_modified_at?: string | null;
+    file_modified_timezone?: string | null;
     date_imported?: string | null;
 
     city_name: string | null;

@@ -10,10 +10,13 @@ import { importMedia } from "./media-import";
 import { resolveLocation } from "./media-location";
 import { findMediaByPath, getMediaFileById } from "./media-database";
 
-type StoredConflict = ImportConflict & { fileModifiedAt?: string | null; };
+type StoredConflict = ImportConflict & { 
+    fileModifiedAt?: string | null; 
+    fileModifiedTimezone?: string | null; 
+};
 
 const metadataName = ".conflict.json";
-export async function savePendingConflict(stagedPath: string, conflict: ImportConflict, fileModifiedAt: Date | null = null) {
+export async function savePendingConflict(stagedPath: string, conflict: ImportConflict, fileModifiedAt: Date | null = null, fileModifiedTimezone: string | null = null,) {
     const storage = await validateStorage();
     assertStagedMediaPath(storage.root, stagedPath, conflict.conflictId);
     if (conflict.type === "FILENAME") {
@@ -22,7 +25,7 @@ export async function savePendingConflict(stagedPath: string, conflict: ImportCo
     }
     const metadataPath = path.join(path.dirname(stagedPath), metadataName);
     await storage.assertAvailable(metadataPath);
-    const stored: StoredConflict = {...conflict, fileModifiedAt: fileModifiedAt?.toISOString() ?? null,};
+    const stored: StoredConflict = {...conflict, fileModifiedAt: fileModifiedAt?.toISOString() ?? null, fileModifiedTimezone};
     await fs.writeFile(metadataPath, JSON.stringify(stored));
     await storage.assertAvailable(metadataPath);
 }

@@ -7,6 +7,7 @@ export async function uploadImportFile(jobId: string, file: File): Promise<Proce
     formData.append("file", file);
     formData.append("jobId", jobId);
     formData.append("fileLastModified", String(file.lastModified));
+    formData.append("fileModifiedTimezone", Intl.DateTimeFormat().resolvedOptions().timeZone);
     try {
         const response = await fetch("/api/import", { method: "POST", body: formData });
         if (response.status === 503 && response.headers.get("X-Import-Retry-Safe") === "1") {
