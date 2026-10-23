@@ -1888,6 +1888,20 @@ textarea:focus-visible {
     line-height: 1.5;
 }
 
+.viewer-delete {
+    color: #a15d52;
+}
+
+.viewer-delete:hover {
+    color: #923e35;
+    background: #faf0ed;
+}
+
+.viewer-icon.active {
+    color: #4f8a7c;
+    background: #edf5f1;
+}
+
 
 @media (max-width: 760px) {
     .collection-menu {

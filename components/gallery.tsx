@@ -16,6 +16,7 @@ import {
 
 import { Icon } from './icons';
 import { MediaSelectionControl } from './media-selection-control';
+import { DeleteMediaModal } from './delete-media-modal';
 
 
 type MediaDetails = {
@@ -102,31 +103,76 @@ export function Viewer({
 
     const tripId = searchParams.get('tripId');
 
-    const [media, setMedia] =
-        useState<MediaDetails | null>(null);
+    const [media, setMedia] = useState<MediaDetails | null>(null);
 
-    const [tripMedia, setTripMedia] =
-        useState<TripMediaRow[]>([]);
+    const [tripMedia, setTripMedia] = useState<TripMediaRow[]>([]);
 
-    const [loading, setLoading] =
-        useState(true);
+    const [loading, setLoading] = useState(true);
 
-    const [error, setError] =
-        useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
 
-    const [info, setInfo] =
-        useState(true);
+    const [info, setInfo] = useState(false);
 
-    const [favorite, setFavorite] =
-        useState(false);
+    const [favorite, setFavorite] = useState(false);
 
     const canShare = useSyncExternalStore(
         () => () => {},
         () => typeof navigator.share === 'function',
         () => false,
     );
+
     const [shareError, setShareError] = useState('');
 
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+
+
+    useEffect(() => {
+        function handleInfoShortcut(event: KeyboardEvent) {
+            if (
+                event.key.toLowerCase() !== 'i' ||
+                !event.ctrlKey ||
+                event.altKey ||
+                event.metaKey ||
+                event.shiftKey
+            ) {
+                return;
+            }
+
+            const target = event.target;
+
+            if (
+                target instanceof HTMLElement &&
+                (
+                    target.isContentEditable ||
+                    ['INPUT', 'TEXTAREA', 'SELECT'].includes(
+                        target.tagName
+                    )
+                )
+            ) {
+                return;
+            }
+
+            // Don't toggle the information panel while
+            // the delete confirmation is open.
+            if (deleteModalOpen) {
+                return;
+            }
+
+            event.preventDefault();
+            setInfo(current => !current);
+        }
+
+        window.addEventListener('keydown', handleInfoShortcut);
+
+        return () => {
+            window.removeEventListener(
+                'keydown',
+                handleInfoShortcut
+            );
+        };
+    }, [deleteModalOpen]);
+
+    
     useEffect(() => {
         async function loadMedia() {
             setLoading(true);
@@ -408,382 +454,406 @@ export function Viewer({
 
 
     return (
-        <div
-            className="viewer"
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Media viewer: ${media.file_name}`}
-        >
-            <div className="viewer-main">
+        <>
+            <div
+                className="viewer"
+                role="dialog"
+                aria-modal="true"
+                aria-label={`Media viewer: ${media.file_name}`}
+            >
+                <div className="viewer-main">
 
-                <div className="viewer-toolbar">
+                    <div className="viewer-toolbar">
 
-                    <div className="viewer-toolbar-group">
+                        <div className="viewer-toolbar-group">
 
-                        <button
-                            className="viewer-icon"
-                            onClick={back}
-                            aria-label="Close viewer"
-                        >
-                            <Icon name="back"/>
-                        </button>
+                            <button
+                                className="viewer-icon"
+                                onClick={back}
+                                aria-label="Close viewer"
+                            >
+                                <Icon name="back"/>
+                            </button>
 
-                        <span className="viewer-count">
-                            {position}
-                            {' '}
-                            <span>/</span>
-                            {' '}
-                            {total}
-                        </span>
+                            <span className="viewer-count">
+                                {position}
+                                {' '}
+                                <span>/</span>
+                                {' '}
+                                {total}
+                            </span>
 
-                        <span className="viewer-filename">
-                            {media.file_name}
-                        </span>
+                            <span className="viewer-filename">
+                                {media.file_name}
+                            </span>
+
+                        </div>
+
+
+                        <div className="viewer-toolbar-group">
+
+                            <button
+                                className={`viewer-icon ${
+                                    favorite
+                                        ? 'liked'
+                                        : ''
+                                }`}
+                                aria-label="Toggle favorite"
+                                onClick={() => {
+                                    void toggleViewerFavorite();
+                                }}
+                            >
+                                <Icon name="heart"/>
+                            </button>
+
+
+                            {canShare && (
+                                <button
+                                    className="viewer-icon"
+                                    aria-label="Share media"
+                                    onClick={async () => {
+                                        setShareError('');
+                                        try {
+                                            await navigator.share({ title: media.file_name, url: window.location.href });
+                                        } catch (error) {
+                                            if (!(error instanceof Error && error.name === 'AbortError')) {
+                                                setShareError('Sharing failed. You can download the original to share it.');
+                                            }
+                                        }
+                                    }}
+                                >
+                                    <Icon name="share"/>
+                                </button>
+                            )}
+
+                            <a
+                                className="viewer-icon"
+                                aria-label="Download media"
+                                href={fileUrl}
+                                download={
+                                    media.file_name
+                                }
+                            >
+                                <Icon name="download"/>
+                            </a>
+
+
+                            <button
+                                type="button"
+                                className="viewer-icon viewer-delete"
+                                aria-label="Delete media"
+                                title="Delete media"
+                                onClick={() => setDeleteModalOpen(true)}
+                            >
+                                <Icon name="trash" />
+                            </button>
+
+
+                            <button
+                                type="button"
+                                className={`viewer-icon ${info ? 'active' : ''}`}
+                                aria-label={info ? 'Hide information' : 'Show information'}
+                                aria-pressed={info}
+                                aria-keyshortcuts="Control+I"
+                                title="Information (Ctrl + I)"
+                                onClick={() => setInfo(current => !current)}
+                            >
+                                <Icon name="info" />
+                            </button>
+
+
+                            <button
+                                className="viewer-icon close-viewer"
+                                aria-label="Close"
+                                onClick={back}
+                            >
+                                <Icon name="close"/>
+                            </button>
+
+                        </div>
 
                     </div>
 
 
-                    <div className="viewer-toolbar-group">
+                    {shareError && <p role="alert">{shareError}</p>}
 
-                        <button
-                            className={`viewer-icon ${
-                                favorite
-                                    ? 'liked'
-                                    : ''
-                            }`}
-                            aria-label="Toggle favorite"
-                            onClick={() => {
-                                void toggleViewerFavorite();
-                            }}
-                        >
-                            <Icon name="heart"/>
-                        </button>
+                    <div className="viewer-stage">
 
-
-                        {canShare && (
+                        {activeTripMedia.length > 1 && (
                             <button
-                                className="viewer-icon"
-                                aria-label="Share media"
-                                onClick={async () => {
-                                    setShareError('');
-                                    try {
-                                        await navigator.share({ title: media.file_name, url: window.location.href });
-                                    } catch (error) {
-                                        if (!(error instanceof Error && error.name === 'AbortError')) {
-                                            setShareError('Sharing failed. You can download the original to share it.');
-                                        }
-                                    }
-                                }}
+                                className="viewer-arrow left"
+                                aria-label="Previous media"
+                                onClick={() =>
+                                    move(-1)
+                                }
                             >
-                                <Icon name="share"/>
+                                <Icon
+                                    name="back"
+                                    size={25}
+                                />
                             </button>
                         )}
 
-                        <a
-                            className="viewer-icon"
-                            aria-label="Download media"
-                            href={fileUrl}
-                            download={
-                                media.file_name
-                            }
-                        >
-                            <Icon name="download"/>
-                        </a>
-
-
-                        <button
-                            className="viewer-icon"
-                            aria-label="Toggle information"
-                            onClick={() =>
-                                setInfo(
-                                    current =>
-                                        !current
-                                )
-                            }
-                        >
-                            <Icon name="info"/>
-                        </button>
-
-
-                        <button
-                            className="viewer-icon close-viewer"
-                            aria-label="Close"
-                            onClick={back}
-                        >
-                            <Icon name="close"/>
-                        </button>
-
-                    </div>
-
-                </div>
-
-
-                {shareError && <p role="alert">{shareError}</p>}
-
-                <div className="viewer-stage">
-
-                    {activeTripMedia.length > 1 && (
-                        <button
-                            className="viewer-arrow left"
-                            aria-label="Previous media"
-                            onClick={() =>
-                                move(-1)
-                            }
-                        >
-                            <Icon
-                                name="back"
-                                size={25}
-                            />
-                        </button>
-                    )}
-
-
-                    {media.file_type ===
-                    'IMAGE' ? (
-                        <Image
-                            src={fileUrl}
-                            alt={
-                                media.file_name
-                            }
-                            fill
-                            sizes="100vw"
-                            unoptimized
-                            className="viewer-image"
-                        />
-                    ) : (
-                        <video
-                            src={fileUrl}
-                            controls
-                            playsInline
-                            poster={
-                                thumbnailUrl
-                            }
-                            style={{
-                                width: '100%',
-                                height: '100%',
-                                objectFit:
-                                    'contain',
-                            }}
-                        />
-                    )}
-
-
-                    {activeTripMedia.length > 1 && (
-                        <button
-                            className="viewer-arrow right"
-                            aria-label="Next media"
-                            onClick={() =>
-                                move(1)
-                            }
-                        >
-                            <Icon
-                                name="chevron"
-                                size={25}
-                            />
-                        </button>
-                    )}
-
-                </div>
-
-
-                {activeTripMedia.length > 0 && (
-                    <div
-                        className="filmstrip"
-                        aria-label="Media thumbnails"
-                    >
-                        {activeTripMedia.map(
-                            item => {
-                                const selected =
-                                    item.media_id ===
-                                    media.media_id;
-
-                                return (
-                                    <button
-                                        key={
-                                            item.media_id
-                                        }
-                                        className={`film-thumb ${
-                                            selected
-                                                ? 'selected'
-                                                : ''
-                                        }`}
-                                        onClick={() =>
-                                            openMedia(
-                                                item.media_id
-                                            )
-                                        }
-                                        aria-label={`View ${item.file_name}`}
-                                        aria-current={
-                                            selected
-                                                ? 'true'
-                                                : undefined
-                                        }
-                                    >
-                                        <Image
-                                            src={`/api/media/${item.media_id}/thumbnail`}
-                                            alt=""
-                                            fill
-                                            sizes="72px"
-                                            unoptimized
-                                        />
-                                    </button>
-                                );
-                            }
-                        )}
-                    </div>
-                )}
-
-            </div>
-
-
-            {info && (
-                <aside className="info-panel">
-
-                    <div className="info-heading">
-
-                        <div>
-                            <h2>Info</h2>
-
-                            <span>
-                                Details of this moment
-                            </span>
-                        </div>
-
-                        <button
-                            onClick={() =>
-                                setInfo(false)
-                            }
-                            aria-label="Close information"
-                        >
-                            <Icon
-                                name="close"
-                                size={18}
-                            />
-                        </button>
-
-                    </div>
-
-
-                    <div className="info-content">
-
-                        <h3>
-                            {media.file_name}
-                        </h3>
-
-
-                        {(media.city_name ||
-                            media.country_name) && (
-                            <p className="info-location">
-                                {media.city_name}
-
-                                {media.city_name &&
-                                media.country_name
-                                    ? ', '
-                                    : ''}
-
-                                {media.country_name}
-                            </p>
-                        )}
-
-
-                        <div className="info-row">
-
-                            <Icon name="calendar"/>
-
-                            <span>
-                                {formatMediaDisplayDate(media)}
-                            </span>
-
-                        </div>
-
-
-                        <div className="info-row">
-
-                            <Icon name="info"/>
-
-                            <span>
-                                {media.width ??
-                                    '?'}
-                                {' × '}
-                                {media.height ??
-                                    '?'}
-
-                                <small>
-                                    {formatFileSize(
-                                        media.file_size
-                                    )}
-                                </small>
-                            </span>
-
-                        </div>
-
 
                         {media.file_type ===
-                            'IMAGE' && (
-                            <>
+                        'IMAGE' ? (
+                            <Image
+                                src={fileUrl}
+                                alt={
+                                    media.file_name
+                                }
+                                fill
+                                sizes="100vw"
+                                unoptimized
+                                className="viewer-image"
+                            />
+                        ) : (
+                            <video
+                                src={fileUrl}
+                                controls
+                                playsInline
+                                poster={
+                                    thumbnailUrl
+                                }
+                                style={{
+                                    width: '100%',
+                                    height: '100%',
+                                    objectFit:
+                                        'contain',
+                                }}
+                            />
+                        )}
+
+
+                        {activeTripMedia.length > 1 && (
+                            <button
+                                className="viewer-arrow right"
+                                aria-label="Next media"
+                                onClick={() =>
+                                    move(1)
+                                }
+                            >
+                                <Icon
+                                    name="chevron"
+                                    size={25}
+                                />
+                            </button>
+                        )}
+
+                    </div>
+
+
+                    {activeTripMedia.length > 0 && (
+                        <div
+                            className="filmstrip"
+                            aria-label="Media thumbnails"
+                        >
+                            {activeTripMedia.map(
+                                item => {
+                                    const selected =
+                                        item.media_id ===
+                                        media.media_id;
+
+                                    return (
+                                        <button
+                                            key={
+                                                item.media_id
+                                            }
+                                            className={`film-thumb ${
+                                                selected
+                                                    ? 'selected'
+                                                    : ''
+                                            }`}
+                                            onClick={() =>
+                                                openMedia(
+                                                    item.media_id
+                                                )
+                                            }
+                                            aria-label={`View ${item.file_name}`}
+                                            aria-current={
+                                                selected
+                                                    ? 'true'
+                                                    : undefined
+                                            }
+                                        >
+                                            <Image
+                                                src={`/api/media/${item.media_id}/thumbnail`}
+                                                alt=""
+                                                fill
+                                                sizes="72px"
+                                                unoptimized
+                                            />
+                                        </button>
+                                    );
+                                }
+                            )}
+                        </div>
+                    )}
+
+                </div>
+
+
+                {info && (
+                    <aside className="info-panel">
+
+                        <div className="info-heading">
+
+                            <div>
+                                <h2>Info</h2>
+
+                                <span>
+                                    Details of this moment
+                                </span>
+                            </div>
+
+                            <button
+                                onClick={() =>
+                                    setInfo(false)
+                                }
+                                aria-label="Close information"
+                            >
+                                <Icon
+                                    name="close"
+                                    size={18}
+                                />
+                            </button>
+
+                        </div>
+
+
+                        <div className="info-content">
+
+                            <h3>
+                                {media.file_name}
+                            </h3>
+
+
+                            {(media.city_name ||
+                                media.country_name) && (
+                                <p className="info-location">
+                                    {media.city_name}
+
+                                    {media.city_name &&
+                                    media.country_name
+                                        ? ', '
+                                        : ''}
+
+                                    {media.country_name}
+                                </p>
+                            )}
+
+
+                            <div className="info-row">
+
+                                <Icon name="calendar"/>
+
+                                <span>
+                                    {formatMediaDisplayDate(media)}
+                                </span>
+
+                            </div>
+
+
+                            <div className="info-row">
+
+                                <Icon name="info"/>
+
+                                <span>
+                                    {media.width ??
+                                        '?'}
+                                    {' × '}
+                                    {media.height ??
+                                        '?'}
+
+                                    <small>
+                                        {formatFileSize(
+                                            media.file_size
+                                        )}
+                                    </small>
+                                </span>
+
+                            </div>
+
+
+                            {media.file_type ===
+                                'IMAGE' && (
+                                <>
+                                    <div className="info-row">
+
+                                        <Icon name="sliders"/>
+
+                                        <span>
+                                            {formatImageSettings(
+                                                media
+                                            )}
+
+                                            <small>
+                                                {media.iso !==
+                                                null
+                                                    ? `ISO ${media.iso}`
+                                                    : 'ISO unknown'}
+                                            </small>
+                                        </span>
+
+                                    </div>
+                                </>
+                            )}
+
+
+                            {media.file_type ===
+                                'VIDEO' && (
                                 <div className="info-row">
 
                                     <Icon name="sliders"/>
 
                                     <span>
-                                        {formatImageSettings(
-                                            media
+                                        {formatDuration(
+                                            media.duration_seconds
                                         )}
 
                                         <small>
-                                            {media.iso !==
-                                            null
-                                                ? `ISO ${media.iso}`
-                                                : 'ISO unknown'}
+                                            {[
+                                                media.frame_rate !==
+                                                null
+                                                    ? `${media.frame_rate} fps`
+                                                    : null,
+
+                                                media.video_codec,
+                                            ]
+                                                .filter(
+                                                    Boolean
+                                                )
+                                                .join(
+                                                    ' · '
+                                                ) ||
+                                                'Video details unavailable'}
                                         </small>
                                     </span>
 
                                 </div>
-                            </>
-                        )}
-
-
-                        {media.file_type ===
-                            'VIDEO' && (
-                            <div className="info-row">
-
-                                <Icon name="sliders"/>
-
-                                <span>
-                                    {formatDuration(
-                                        media.duration_seconds
-                                    )}
-
-                                    <small>
-                                        {[
-                                            media.frame_rate !==
-                                            null
-                                                ? `${media.frame_rate} fps`
-                                                : null,
-
-                                            media.video_codec,
-                                        ]
-                                            .filter(
-                                                Boolean
-                                            )
-                                            .join(
-                                                ' · '
-                                            ) ||
-                                            'Video details unavailable'}
-                                    </small>
-                                </span>
-
-                            </div>
-                        )}
+                            )}
 
 
 
-                    </div>
+                        </div>
 
-                </aside>
-            )}
+                    </aside>
+                )}
+            </div>
 
-        </div>
+            
+            <DeleteMediaModal
+                open={deleteModalOpen}
+                mediaIds={[media.media_id]}
+                onClose={() => setDeleteModalOpen(false)}
+                onDeleted={(confirmedIds) => {
+                    if (confirmedIds.includes(media.media_id)) {
+                        setDeleteModalOpen(false);
+                        back();
+                    }
+                }}
+            />
+        </>
     );
 }
 
