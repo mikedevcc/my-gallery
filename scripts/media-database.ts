@@ -920,6 +920,64 @@ export async function moveMediaToTrip(
 }
 
 
+export async function moveLibraryMediaToTrip(
+    mediaId: number,
+    targetTripId: number
+): Promise<"moved" | "already-in-trip"> {
+    const ids = collectionIds([mediaId]);
+    collectionId(targetTripId);
+
+    const client = await getPool().connect();
+
+    try {
+        await client.query("BEGIN");
+
+        // Maintain the existing lock ordering:
+        // Trip rows before media rows.
+        await lockTrips(client, [targetTripId]);
+
+        const media = await lockCollectionMedia(client, ids);
+        const current = media.find(row => row.media_id === mediaId);
+
+        if (!current) {
+            throw new CollectionIntegrityError(
+                "Media not found",
+                404,
+                [mediaId]
+            );
+        }
+
+        if (current.trip_id === targetTripId) {
+            await client.query("COMMIT");
+            return "already-in-trip";
+        }
+
+        const result = await client.query(
+            `UPDATE media
+             SET trip_id = $1
+             WHERE media_id = $2`,
+            [targetTripId, mediaId]
+        );
+
+        if (result.rowCount !== 1) {
+            throw new CollectionIntegrityError(
+                "Trip membership changed",
+                409,
+                [mediaId]
+            );
+        }
+
+        await client.query("COMMIT");
+        return "moved";
+    } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+    } finally {
+        client.release();
+    }
+}
+
+
 export async function deleteMediaById(
     mediaId: number,
     verifyStorage: () => Promise<void>,

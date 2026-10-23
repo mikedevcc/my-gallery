@@ -30,9 +30,10 @@ export function GalleryDestinationModal({
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [attempted, setAttempted] = useState(false);
+    const [allAlreadyPresent, setAllAlreadyPresent] = useState(false);
 
     const bulk = useBulkMedia(
-        kind === "trip" ? "trip-add" : "album-add",
+        kind === "trip" ? "trip-move" : "album-add",
         targetId ?? undefined
     );
 
@@ -102,7 +103,11 @@ export function GalleryDestinationModal({
             const result = await bulk.run(mediaIds, onConfirmed);
 
             if (result.allConfirmed) {
-                onClose();
+                if (result.allUnchanged) {
+                    setAllAlreadyPresent(true);
+                } else {
+                    onClose();
+                }
             }
         } catch (error) {
             setError(
@@ -114,6 +119,25 @@ export function GalleryDestinationModal({
     }
 
     const label = kind === "trip" ? "Trip" : "Album";
+
+    const hasUncertainResults = bulk.items.some(
+        item => item.outcome === "uncertain"
+    );
+
+    function chooseDestination(id: number) {
+        if (bulk.busy || hasUncertainResults) {
+            return;
+        }
+
+        if (targetId === id) {
+            return;
+        }
+
+        setTargetId(id);
+        setAttempted(false);
+        setError(null);
+        setAllAlreadyPresent(false);
+    }
 
     return (
         <div className="delete-media-backdrop">
@@ -147,12 +171,6 @@ export function GalleryDestinationModal({
                 </div>
 
                 <div className="delete-media-content">
-                    {kind === "trip" && (
-                        <p className="gallery-destination-note">
-                            Media already assigned to a Trip cannot be moved here.
-                        </p>
-                    )}
-     
                     <div
                         className="gallery-destination-list"
                         role="group"
@@ -181,8 +199,8 @@ export function GalleryDestinationModal({
                                             : ""
                                     }`}
                                     aria-pressed={targetId === destination.id}
-                                    disabled={bulk.busy || attempted}
-                                    onClick={() => setTargetId(destination.id)}
+                                    disabled={bulk.busy || hasUncertainResults}
+                                    onClick={() => chooseDestination(destination.id)}
                                 >
                                     <span>{destination.name}</span>
 
@@ -199,6 +217,14 @@ export function GalleryDestinationModal({
                         )}
                     </div>
 
+                    {allAlreadyPresent && (
+                        <p className="gallery-destination-note" role="status">
+                            {kind === "trip"
+                                ? "All selected items are already in this Trip. Choose another Trip to move them."
+                                : "All selected items are already in this Album. Choose another Album to add them."}
+                        </p>
+                    )}
+
                     {!loading && destinations.length === 0 && !error && (
                         <p>No {label.toLowerCase()}s available.</p>
                     )}
@@ -207,12 +233,21 @@ export function GalleryDestinationModal({
 
                     <BulkMediaFeedback items={bulk.items} />
 
-                    {attempted && !bulk.busy && (
-                        <p>
-                            Review any failed or uncertain items before
-                            attempting another operation.
+                    {attempted && !bulk.busy && hasUncertainResults && (
+                        <p role="alert">
+                            Some operations could not be confirmed.
+                            Check the current Trip membership before trying again.
                         </p>
                     )}
+
+                    {attempted && !bulk.busy &&
+                        !hasUncertainResults &&
+                        bulk.items.some(item => item.outcome === "failed") && (
+                            <p>
+                                You can select another destination above.
+                                Successfully processed media will not be repeated.
+                            </p>
+                        )}
                 </div>
 
                 <div className="delete-media-footer">

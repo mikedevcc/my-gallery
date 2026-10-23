@@ -46,6 +46,9 @@ export function BulkMediaFeedback({
                         {failed.map(item => (
                             <li key={`failed-${item.id}`}>
                                 {getFileName(item.id)}
+                                {item.reason && (
+                                    <span> — {item.reason}</span>
+                                )}
                             </li>
                         ))}
                     </ul>

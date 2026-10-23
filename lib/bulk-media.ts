@@ -1,11 +1,17 @@
 export type BulkOutcome = "confirmed" | "failed" | "uncertain" | "pending" | "running";
-export type BulkItem = { id: number; outcome: BulkOutcome; unchanged?: boolean };
+export type BulkItem = {
+    id: number;
+    outcome: BulkOutcome;
+    unchanged?: boolean;
+    reason?: string;
+};
 export type BulkOperation = {
     kind:
         | "delete"
         | "album-add"
         | "album-remove"
         | "trip-add"
+        | "trip-move"
         | "trip-remove";
     collectionId?: number;
 };
@@ -15,50 +21,94 @@ export async function requestBulkItem(
     operation: BulkOperation,
     id: number
 ): Promise<BulkItem> {
-    const isDelete = operation.kind === "delete";
-    const isTrip = operation.kind.startsWith("trip-");
-    const isAdd = operation.kind.endsWith("-add");
+    const { kind, collectionId } = operation;
+    const isDelete = kind === "delete";
+    const isTrip = kind.startsWith("trip-");
+    const isAdd = kind === "album-add" || kind === "trip-add";
+    const isMove = kind === "trip-move";
 
     const url = isDelete
         ? `/api/media/${id}`
-        : `/api/${isTrip ? "trips" : "albums"}/${operation.collectionId}/media`;
+        : `/api/${isTrip ? "trips" : "albums"}/${collectionId}/media`;
 
     try {
-        const response = await fetch(
-            url,
-            isDelete
-                ? { method: "DELETE" }
-                : {
-                    method: isAdd ? "POST" : "DELETE",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ mediaId: id }),
-                }
+        const response = await fetch(url, isDelete
+            ? { method: "DELETE" }
+            : {
+                method: isMove ? "PATCH" : isAdd ? "POST" : "DELETE",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ mediaId: id }),
+            }
         );
 
         if (response.redirected) {
             return { id, outcome: "uncertain" };
         }
 
-        if (!response.ok) {
+        // A known business-rule rejection: no mutation occurred.
+        if (isMove && response.status === 409) {
+            const body = await response.json().catch(() => null);
+
+            if (body?.code === "ALREADY_IN_TRIP") {
+                return {
+                    id,
+                    outcome: "failed",
+                    reason: "Already in this Trip. Choose another Trip.",
+                };
+            }
+
             return {
                 id,
-                outcome: [400, 401, 403, 404, 409, 413, 415, 422]
-                    .includes(response.status)
-                    ? "failed"
-                    : "uncertain",
+                outcome: "failed",
+                reason: "Trip membership changed. Review and retry.",
+            };
+        }
+
+        if (!response.ok) {
+            const knownFailure = [
+                400, 401, 403, 404, 409, 413, 415, 422,
+            ].includes(response.status);
+
+            return {
+                id,
+                outcome: knownFailure ? "failed" : "uncertain",
+                reason: knownFailure
+                    ? response.status === 404
+                        ? "Media or destination was not found."
+                        : "Operation was rejected."
+                    : undefined,
             };
         }
 
         const body = await response.json();
+
+        if (isMove) {
+            if (
+                body?.message === "Media moved successfully" &&
+                body?.movedCount === 1
+            ) {
+                return { id, outcome: "confirmed", unchanged: false };
+            }
+
+            if (
+                body?.message === "Media already in trip" &&
+                body?.movedCount === 0 &&
+                body?.unchanged === true
+            ) {
+                return { id, outcome: "confirmed", unchanged: true };
+            }
+
+            return { id, outcome: "uncertain" };
+        }
 
         if (isAdd) {
             if (body?.addedCount !== 0 && body?.addedCount !== 1) {
                 return { id, outcome: "uncertain" };
             }
 
-            // Trip assignment must actually change membership.
-            // Album addition may legitimately be a no-op when already added.
-            if (isTrip && body.addedCount !== 1) {
+            if (kind === "trip-add" && body.addedCount !== 1) {
                 return { id, outcome: "uncertain" };
             }
 
@@ -75,12 +125,9 @@ export async function requestBulkItem(
                 ? "Media removed from trip"
                 : "Media removed from album";
 
-        return {
-            id,
-            outcome: body?.message === expectedMessage
-                ? "confirmed"
-                : "uncertain",
-        };
+        return body?.message === expectedMessage
+            ? { id, outcome: "confirmed" }
+            : { id, outcome: "uncertain" };
     } catch {
         return { id, outcome: "uncertain" };
     }

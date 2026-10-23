@@ -16,15 +16,37 @@ export function useBulkMedia(kind: BulkOperation["kind"], collectionId?: number)
     const [view, setView] = useState({ session, items: [] as BulkItem[], busy: false });
     useEffect(() => { session.activate(); return () => session.stop(); }, [session]);
     async function run(ids: number[], confirmed: (ids: number[]) => void) {
-        if (!session.isActive() || !session.canRun(ids)) {return { allConfirmed: false };}
+        if (!session.isActive() || !session.canRun(ids)) {return {allConfirmed: false, allUnchanged: false};}
         setView({ session, items: session.snapshot(), busy: true });
         try {
             await session.run(ids, id => requestBulkItem({ kind, collectionId }, id), items => {
                 setView({ session, items, busy: true });
-                confirmed(items.filter(item => item.outcome === "confirmed").map(item => item.id));
+                confirmed(
+                    items
+                        .filter(item =>
+                            item.outcome === "confirmed" &&
+                            item.unchanged !== true
+                        )
+                        .map(item => item.id)
+                );
             }, () => window.dispatchEvent(new Event("media-library-updated")));
             const results = session.snapshot();
-            return { allConfirmed: ids.length > 0 && ids.every(id => results.find(item => item.id === id)?.outcome === "confirmed")};
+            return {
+                allConfirmed:
+                    ids.length > 0 &&
+                    ids.every(id =>
+                        results.find(item => item.id === id)?.outcome === "confirmed"
+                    ),
+
+                allUnchanged:
+                    ids.length > 0 &&
+                    ids.every(id => {
+                        const item = results.find(result => result.id === id);
+
+                        return item?.outcome === "confirmed" &&
+                            item.unchanged === true;
+                    }),
+            };
 
         } finally {
             if (session.isActive()) setView({ session, items: session.snapshot(), busy: false });

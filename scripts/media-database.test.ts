@@ -95,6 +95,7 @@ const operations: Record<Exclude<keyof typeof database, "closeMediaDatabase">, (
     getMediaDetailsById: () => database.getMediaDetailsById(1),
     getAvailableMedia: () => database.getAvailableMedia(),
     moveMediaToTrip: () => database.moveMediaToTrip([1], 1, 2),
+    moveLibraryMediaToTrip: () => database.moveLibraryMediaToTrip(1, 2),
     deleteMediaById: () => database.deleteMediaById(1, async () => {}, deletionReceipt),
     getLibraryMedia: () => database.getLibraryMedia(),
     getAlbums: () => database.getAlbums(),
