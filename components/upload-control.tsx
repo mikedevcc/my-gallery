@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { mediaUploadAccept } from "@/lib/media-formats";
 import type { ConflictAction } from "@/lib/import/import-conflict";
 import { ImportConflictModal } from "./import-conflict-modal";
@@ -13,6 +13,7 @@ export function UploadControl() {
     const resolvingRef = useRef(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [showImportFeedback, setShowImportFeedback] = useState(false);
 
     const {
         jobs,
@@ -65,8 +66,27 @@ export function UploadControl() {
 
         event.target.value = "";
         setError(null);
+        setShowImportFeedback(true);
         await startImport(files);
     }
+
+    const allSuccessful =
+        !isImporting &&
+        !isRecovering &&
+        !recoveryError &&
+        conflicts.length === 0 &&
+        jobs.length > 0 &&
+        jobs.every(job => job.status === "COMPLETED");
+
+    useEffect(() => {
+        if (!allSuccessful) return;
+
+        const timeout = window.setTimeout(() => {
+            setShowImportFeedback(false);
+        }, 3000);
+
+        return () => window.clearTimeout(timeout);
+    }, [allSuccessful]);
 
     return (
         <>
@@ -89,7 +109,7 @@ export function UploadControl() {
                 hidden
             />
 
-            <ImportFeedback jobs={jobs} disabled={isImporting || isRecovering || !!recoveryError || conflicts.length > 0 || busy} onRetry={id => { void retryJob(id); }} />
+            {showImportFeedback && <ImportFeedback jobs={jobs} disabled={isImporting || isRecovering || !!recoveryError || conflicts.length > 0 || busy} onRetry={id => { void retryJob(id); }} />}
             {resolutionBlocked && <span role="alert">Refresh the page to reload pending conflicts before another resolution attempt.</span>}
             {recoveryError && <span role="alert">{recoveryError}</span>}
             {conflict && (
