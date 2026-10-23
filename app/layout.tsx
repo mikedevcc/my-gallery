@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Shell } from "@/components/shell";
 import "./globals.css";
+import packageJson from '../package.json';
 
 export const metadata: Metadata = {
     title: "My Gallery — Your moments, beautifully kept",
@@ -15,7 +16,9 @@ export default function RootLayout({
     return (
         <html lang="en">
             <body suppressHydrationWarning>
-                <Shell>{children}</Shell>
+                <Shell appVersion={packageJson.version}>
+                    {children}
+                </Shell>
             </body>
         </html>
     );
