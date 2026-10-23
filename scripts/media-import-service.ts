@@ -114,7 +114,8 @@ function mustPreserveStaging(error: unknown): boolean {
 
 export async function processStagedMedia(
     stagedPath: string,
-    jobId: string
+    jobId: string,
+    fileLastModified: Date | null = null,
 ): Promise<ServerImportResult> {
     assertStagedMediaPath(getMediaStorageRoot(), stagedPath);
     const storage = await validateStorage();
@@ -123,6 +124,7 @@ export async function processStagedMedia(
     try {
         checkProcessingCancellation();
         const imported = await importMedia(stagedPath);
+        imported.fileModifiedAt = fileLastModified;
 
         const { latitude, longitude } = imported.media;
 
@@ -200,6 +202,7 @@ async function applyStagedConflictResolution(
         try {
             checkProcessingCancellation();
             const imported = await importMedia(stagedPath);
+            imported.fileModifiedAt = claim.fileModifiedAt ?? null;
         
             const { latitude, longitude } = imported.media;
 
@@ -231,6 +234,7 @@ async function applyStagedConflictResolution(
 
         checkProcessingCancellation();
         const imported = await importMedia(stagedPath);
+        imported.fileModifiedAt = claim.fileModifiedAt ?? null;
     
         const { latitude, longitude } = imported.media;
 

@@ -72,6 +72,8 @@ export type ImportedMedia = {
     media: MediaMetadata;
     image?: ImageMetadata;
     video?: VideoMetadata;
+
+    fileModifiedAt?: Date | null;
 };
 
 

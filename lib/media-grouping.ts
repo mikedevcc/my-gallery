@@ -1,11 +1,26 @@
 import { captureCalendar, type CaptureDateFields } from "./media-capture-date";
 
 export type GroupMode = 'All' | 'Years' | 'Months' | 'Days';
-export type DateGroupableMedia = CaptureDateFields & { date_imported?: string };
 
-// Calendar carrier for formatting only; missing capture dates stay missing.
+export type DateGroupableMedia = CaptureDateFields & {
+    file_modified_at?: string | null;
+    date_imported?: string | null;
+};
+
+function validTimestamp(value: string | null | undefined): Date | undefined {
+    if (!value) return undefined;
+
+    const date = new Date(value);
+    return Number.isFinite(date.getTime()) ? date : undefined;
+}
+
 export function getMediaDate(item: DateGroupableMedia): Date | undefined {
-    return captureCalendar(item)?.clock;
+    const captured = captureCalendar(item);
+    if (captured) return captured.clock;
+    return (
+        validTimestamp(item.file_modified_at) ??
+        validTimestamp(item.date_imported)
+    );
 }
 
 export function groupMediaByDate<T extends DateGroupableMedia>(items: T[], mode: GroupMode): [string, T[]][] {

@@ -21,11 +21,25 @@ export type ConflictEvidence = {
     outcome?: "COMMITTED" | "ROLLED_BACK";
 };
 export type ResolutionClaim = {
-    operationId: string; stagedPath: string; target: string; action: ConflictAction;
-    incoming: FileIdentity; evidence: ConflictEvidence;
-    retain: boolean; released: boolean;
+    operationId: string;
+    stagedPath: string;
+    target: string;
+    action: ConflictAction;
+    incoming: FileIdentity;
+    evidence: ConflictEvidence;
+    retain: boolean;
+    released: boolean;
+
+    fileModifiedAt?: Date | null;
 };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function parseStoredFileModifiedAt(value: unknown): Date | null {
+    if (value === undefined || value === null) return null;
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) {throw new Error("Invalid stored file modification date");}
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime()) || date.toISOString() !== value) {throw new Error("Invalid stored file modification date");}
+    return date;
+}
 function locations(root: string, id: string) {
     if (!uuid.test(id)) throw new Error("Invalid conflict ID");
     const job = path.join(root, ".incoming", id), marker = path.join(job, ".resolution-lock");
@@ -60,6 +74,7 @@ export async function acquireResolutionClaim(root: string, conflictId: string, a
     // Reject an invalid recorded destination before creating a marker/owner.
     const recorded = JSON.parse((await readStorageFile(paths.metadata)).toString("utf8"));
     if (recorded.conflictId !== conflictId || recorded.type !== "FILENAME" || typeof recorded.existingPath !== "string") throw new Error("Invalid recorded conflict identity");
+    const fileModifiedAt = parseStoredFileModifiedAt(recorded.fileModifiedAt);
     await canonicalOriginalDestination(storage.root, recorded.existingPath);
     await storage.assertAvailable(recorded.existingPath);
     await storage.assertAvailable(paths.marker);
@@ -82,8 +97,25 @@ export async function acquireResolutionClaim(root: string, conflictId: string, a
     await syncReplacementPath(root, paths.metadata);
     await storage.assertAvailable(paths.owner); await fs.rename(temporary, paths.owner);
     await syncParents(root, paths.owner);
-    return { operationId, stagedPath, target: conflict.existingPath, action, incoming, retain: false, released: false,
-        evidence: { conflictId, token, job, marker, owner: await identifyReplacementFile(root, paths.owner), metadata, phase: "BOUND" } };
+    return {
+    operationId,
+    stagedPath,
+    target: conflict.existingPath,
+    action,
+    incoming,
+    retain: false,
+    released: false,
+    evidence: {
+        conflictId,
+        token,
+        job,
+        marker,
+        owner: await identifyReplacementFile(root, paths.owner),
+        metadata,
+        phase: "BOUND",
+    },
+    fileModifiedAt,
+};
 }
 
 // Validate paths and evidence even when the staged file has already been removed.

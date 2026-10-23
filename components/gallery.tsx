@@ -1,6 +1,6 @@
 'use client';
 
-import { formatCaptureDate } from "../lib/media-capture-date";
+import { formatMediaDisplayDate } from "../lib/media-display-date";
 import Image from 'next/image';
 import Link from 'next/link';
 import {
@@ -29,6 +29,8 @@ type MediaDetails = {
     width: number | null;
     height: number | null;
     favorite: boolean;
+    file_modified_at?: string | null;
+    date_imported?: string | null;
 
     city_name: string | null;
     country_name: string | null;
@@ -78,6 +80,7 @@ export type LibraryMedia = {
     date_taken: string | null;
     capture_local?: string | null;
     capture_offset_minutes?: number | null;
+    file_modified_at?: string | null;
     date_imported: string;
     width: number | null;
     height: number | null;
@@ -686,7 +689,7 @@ export function Viewer({
                             <Icon name="calendar"/>
 
                             <span>
-                                {formatCaptureDate(media)}
+                                {formatMediaDisplayDate(media)}
                             </span>
 
                         </div>

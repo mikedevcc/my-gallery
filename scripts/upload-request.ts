@@ -17,7 +17,7 @@ export async function parseUpload(request: Request) {
     let parser: ReturnType<typeof busboy>;
     try {
         parser = busboy({ headers: { "content-type": type }, preservePath: true, defParamCharset: "utf8",
-            limits: { fileSize: limits.uploadBytes + 1, files: 1, fields: 1, parts: 3, fieldSize: 1024, fieldNameSize: 64, headerPairs: 32 } });
+            limits: { fileSize: limits.uploadBytes + 1, files: 1, fields: 2, parts: 4, fieldSize: 1024, fieldNameSize: 64, headerPairs: 32 } });
     } catch { throw new ProcessingError("Invalid multipart boundary", 400); }
     const deadline = new AbortController();
     const timer = setTimeout(() => deadline.abort(), limits.uploadMs);
@@ -29,6 +29,8 @@ export async function parseUpload(request: Request) {
         callback(bytes > limits.requestBytes ? new ProcessingError("Upload request too large", 413) : null, chunk);
     } });
     let jobId: string | undefined;
+    let fileLastModified: number | null = null;
+    let receivedFileLastModified = false;
     let staged: Awaited<ReturnType<typeof stageMediaStream>> | undefined;
     let task: Promise<void> | undefined;
     let failure: unknown;
@@ -45,10 +47,54 @@ export async function parseUpload(request: Request) {
         catch (error) { file.resume(); fail(error); return; }
         task = stageMediaStream(info.filename ?? "", file, signal).then(value => { staged = value; }, fail);
     });
+    
     parser.on("field", (name, value, info) => {
-        if (name !== "jobId" || jobId !== undefined || info.valueTruncated || info.nameTruncated || !value) fail(new ProcessingError("Invalid jobId field", 400));
-        else jobId = value;
+        if (info.valueTruncated || info.nameTruncated) {
+            fail(new ProcessingError("Invalid upload field", 400));
+            return;
+        }
+
+        if (name === "jobId") {
+            if (jobId !== undefined || !value) {
+                fail(new ProcessingError("Invalid jobId field", 400));
+                return;
+            }
+
+            jobId = value;
+            return;
+        }
+
+        if (name === "fileLastModified") {
+            if (receivedFileLastModified) {
+                fail(new ProcessingError("Duplicate file modification date", 400));
+                return;
+            }
+
+            receivedFileLastModified = true;
+
+            if (!/^\d{1,16}$/.test(value)) {
+                fail(new ProcessingError("Invalid file modification date", 400));
+                return;
+            }
+
+            const milliseconds = Number(value);
+
+            if (
+                !Number.isSafeInteger(milliseconds) ||
+                milliseconds <= 0 ||
+                milliseconds > Date.now() + 86_400_000
+            ) {
+                fail(new ProcessingError("Invalid file modification date", 400));
+                return;
+            }
+
+            fileLastModified = milliseconds;
+            return;
+        }
+
+        fail(new ProcessingError("Unexpected upload field", 400));
     });
+
     for (const event of ["filesLimit", "fieldsLimit", "partsLimit"] as const) {
         parser.on(event, () => fail(new ProcessingError("Too many multipart fields", 400)));
     }
@@ -58,7 +104,14 @@ export async function parseUpload(request: Request) {
         if (failure) throw failure;
         if (!staged || jobId === undefined) throw new ProcessingError("Expected file and jobId", 400);
         await staged.complete();
-        return { stagedPath: staged.path, jobId };
+        return {
+            stagedPath: staged.path,
+            jobId,
+            fileLastModified:
+                fileLastModified === null
+                    ? null
+                    : new Date(fileLastModified),
+        };
     } catch (error) {
         // Wait for the writer to close before considering cleanup safe.
         await task;

@@ -40,6 +40,7 @@ type AlbumMediaRow = {
     width: number | null;
     height: number | null;
     favorite: boolean;
+    file_modified_at?: string | null;
 };
 
 type AlbumResponse = {

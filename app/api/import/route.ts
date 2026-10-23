@@ -8,8 +8,8 @@ export async function POST(request: Request) {
     try {
         return await withProcessingJob(request.signal, async () => {
             started = true;
-            const { stagedPath, jobId } = await parseUpload(request);
-            const result = await processStagedMedia(stagedPath, jobId);
+            const { stagedPath, jobId, fileLastModified } = await parseUpload(request);
+            const result = await processStagedMedia(stagedPath, jobId, fileLastModified);
             if (result.type === "CONFLICT") return Response.json({ conflict: publicImportConflict(result.conflict) }, { status: 409 });
             return Response.json({ message: "received", mediaId: result.mediaId });
         });

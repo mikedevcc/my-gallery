@@ -38,6 +38,8 @@ type TripMediaRow = {
     width: number | null;
     height: number | null;
     favorite: boolean;
+
+    file_modified_at: Date | null;
 };
 
 type AlbumMediaRow = {
@@ -51,6 +53,8 @@ type AlbumMediaRow = {
     width: number | null;
     height: number | null;
     favorite: boolean;
+
+    file_modified_at: Date | null;
 }
 
 export type MediaFileRow = {
@@ -89,6 +93,8 @@ export type MediaDetailRow = {
     video_codec: string | null;
     audio_codec: string | null;
     bitrate: number | null;
+
+    file_modified_at: Date | null;
 };
 
 export type AvailableMediaRow = {
@@ -100,6 +106,8 @@ export type AvailableMediaRow = {
     capture_offset_minutes: number | null;
     width: number | null;
     height: number | null;
+
+    file_modified_at: Date | null;
 };
 
 export type DeletedMediaRow = {
@@ -120,6 +128,8 @@ export type LibraryMediaRow = {
     favorite: boolean;
     city_name: string | null;
     country_name: string | null;
+
+    file_modified_at: Date | null;
 };
 
 export type AlbumRow = {
@@ -290,6 +300,7 @@ export async function insertImportedMedia(
             cityId ?? null,
             captureLocal ?? null,
             captureOffsetMinutes ?? null,
+            imported.fileModifiedAt ?? null,
         ];
 
         
@@ -306,9 +317,10 @@ export async function insertImportedMedia(
                 longitude,
                 city_id,
                 capture_local,
-                capture_offset_minutes
+                capture_offset_minutes,
+                file_modified_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::timestamp, $12)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::timestamp, $12, $13)
             RETURNING media_id`,
             values
         );
@@ -458,6 +470,7 @@ export async function updateImportedMedia(
             mediaId,
             captureLocal ?? null,
             captureOffsetMinutes ?? null,
+            imported.fileModifiedAt ?? null,
         ];
 
         const updated = await client.query(
@@ -473,7 +486,8 @@ export async function updateImportedMedia(
                 longitude = $9,
                 city_id = $10,
                 capture_local = $12::timestamp,
-                capture_offset_minutes = $13
+                capture_offset_minutes = $13,
+                file_modified_at = $14
             WHERE media_id = $11`,
             values
         );
@@ -651,13 +665,14 @@ export async function getMediaByTripId(
                 date_taken,
                 to_char(capture_local, 'YYYY-MM-DD"T"HH24:MI:SS.MS') AS capture_local,
                 capture_offset_minutes,
+                file_modified_at,
                 width,
                 height,
                 favorite
              FROM media
              WHERE trip_id = $1
              ORDER BY
-                COALESCE(capture_local, date_taken AT TIME ZONE 'UTC', date_imported AT TIME ZONE 'UTC') DESC,
+                COALESCE(capture_local, date_taken AT TIME ZONE 'UTC', file_modified_at AT TIME ZONE 'UTC', date_imported AT TIME ZONE 'UTC') DESC,
                 media_id DESC`,
             [tripId]
         );
@@ -775,7 +790,9 @@ export async function getMediaDetailsById(
                 v.frame_rate,
                 v.video_codec,
                 v.audio_codec,
-                v.bitrate
+                v.bitrate,
+
+                m.file_modified_at
 
             FROM media m
 
@@ -817,12 +834,13 @@ export async function getAvailableMedia(): Promise<AvailableMediaRow[]> {
                 date_taken,
                 to_char(capture_local, 'YYYY-MM-DD"T"HH24:MI:SS.MS') AS capture_local,
                 capture_offset_minutes,
+                file_modified_at,
                 width,
                 height
             FROM media
             WHERE trip_id IS NULL
             ORDER BY 
-                COALESCE(capture_local, date_taken AT TIME ZONE 'UTC', date_imported AT TIME ZONE 'UTC') DESC,
+                COALESCE(capture_local, date_taken AT TIME ZONE 'UTC', file_modified_at AT TIME ZONE 'UTC', date_imported AT TIME ZONE 'UTC') DESC,
                 media_id DESC`
         );
 
@@ -906,8 +924,9 @@ export async function deleteMediaById(
         await lockCollectionMedia(client, [mediaId]);
         // The exclusive transaction guard stabilizes membership discovery. All
         // Album writers hold its shared counterpart before locking Album rows.
-        const albums = await client.query<{ album_id: number }>(`SELECT a.album_id FROM album a
-            WHERE a.album_id IN (SELECT ma.album_id FROM media_album ma WHERE ma.media_id = $1)
+        const albums = await client.query<{ album_id: number }>(
+            `SELECT a.album_id FROM album a
+             WHERE a.album_id IN (SELECT ma.album_id FROM media_album ma WHERE ma.media_id = $1)
                OR a.cover_media_id = $1 ORDER BY a.album_id FOR UPDATE`, [mediaId]);
         const result = await client.query<DeletedMediaRow>(
             `DELETE FROM media WHERE media_id = $1 AND path = $2 RETURNING media_id, path`,
@@ -947,13 +966,14 @@ export async function getLibraryMedia():
                     m.favorite,
                     c.city_name,
                     co.country_name
+                    m.file_modified_at
                  FROM media m
                  LEFT JOIN city c
                     ON m.city_id = c.city_id
                  LEFT JOIN country co
                     ON c.country_id = co.country_id
                  ORDER BY
-                    COALESCE(capture_local, date_taken AT TIME ZONE 'UTC', date_imported AT TIME ZONE 'UTC') DESC,
+                    COALESCE(capture_local, date_taken AT TIME ZONE 'UTC', file_modified_at AT TIME ZONE 'UTC', date_imported AT TIME ZONE 'UTC') DESC,
                     m.media_id DESC`
             );
 
@@ -1060,12 +1080,13 @@ export async function getMediaByAlbumId(
                 m.width,
                 m.height,
                 m.favorite
+                m.file_modified_at
              FROM media m
              INNER JOIN media_album ma
                 ON ma.media_id = m.media_id
              WHERE ma.album_id = $1
              ORDER BY
-                COALESCE(m.capture_local, m.date_taken AT TIME ZONE 'UTC', m.date_imported AT TIME ZONE 'UTC') DESC,
+                COALESCE(m.capture_local, m.date_taken AT TIME ZONE 'UTC', m.file_modified_at AT TIME ZONE 'UTC', m.date_imported AT TIME ZONE 'UTC') DESC,
                 m.media_id DESC`,
             [albumId]
         );
