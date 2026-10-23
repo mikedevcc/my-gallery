@@ -5,11 +5,14 @@ import { ProcessingError, processingLimits } from "./processing-limits";
 
 let reserved = 0;
 /** Count retained conflicts as well as active uploads. Never follow symlinks. */
-export async function reserveStaging(storage: Awaited<ReturnType<typeof validateStorage>>) {
+export async function reserveStaging(
+    storage: Awaited<ReturnType<typeof validateStorage>>,
+    reserveBytes = processingLimits().uploadBytes
+) {
     const limits = processingLimits();
-    reserved += limits.uploadBytes;
+    reserved += reserveBytes;
     let released = false;
-    const release = () => { if (!released) { reserved -= limits.uploadBytes; released = true; } };
+    const release = () => { if (!released) { reserved -= reserveBytes; released = true; } };
     try {
         let entries = 0;
         async function usage(directory: string): Promise<number> {

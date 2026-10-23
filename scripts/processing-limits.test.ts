@@ -14,6 +14,8 @@ import { getOrCreateThumbnail } from "./media-thumbnail";
 import { resolveLocation } from "./media-location";
 import { listPendingConflicts } from "./pending-import-conflicts";
 import { mockStorageMount, writeTestStorageMarker } from "./testing/storage-fixture";
+import { reserveStaging } from "./staging-budget";
+import { validateStorage } from "./storage-safety";
 
 async function configuration(values: Record<string, string>, action: () => Promise<void>) {
     const old = Object.fromEntries(Object.keys(values).map(key => [key, process.env[key]]));
@@ -248,3 +250,65 @@ test("upload bytes are not read when the incomplete-marker durability barrier fa
         assert.deepEqual(await stagingFiles(root), []);
     } finally { opened.mock.restore(); for (const handle of handles) handle.mock.restore(); }
 }));
+
+
+test("thumbnail reservations use their own storage allowance", () => fixture(() => configuration(
+    {
+        MEDIA_MAX_UPLOAD_BYTES: "100",
+        MEDIA_MAX_REQUEST_BYTES: "200",
+        MEDIA_MAX_TEMP_BYTES: "150",
+        MEDIA_MIN_FREE_BYTES: "1",
+        MEDIA_MAX_THUMBNAIL_BYTES: "10",
+    },
+    async () => {
+        const storage = await validateStorage();
+        // This succeeds because the thumbnail
+        // reserves 10 bytes, not 100 bytes.
+        const releaseThumbnail1 = await reserveStaging(storage, 10);
+        const releaseThumbnail2 = await reserveStaging(storage, 10);
+        releaseThumbnail2();
+        releaseThumbnail1();
+    }
+)));
+
+test("combined reservations cannot exceed staging quota", () => fixture(() => configuration(
+    {
+        MEDIA_MAX_UPLOAD_BYTES: "100",
+        MEDIA_MAX_REQUEST_BYTES: "200",
+        MEDIA_MAX_TEMP_BYTES: "115",
+        MEDIA_MIN_FREE_BYTES: "1",
+        MEDIA_MAX_THUMBNAIL_BYTES: "10",
+    },
+    async () => {
+        const storage = await validateStorage();
+        const releaseUpload = await reserveStaging(storage);
+        try {
+            await assert.rejects( reserveStaging(storage, 20), status(503));
+        } finally {
+            releaseUpload();
+        }
+    }
+)));
+
+test("failed reservations release their reserved budget", () => fixture(() => configuration(
+    {
+        MEDIA_MAX_UPLOAD_BYTES: "100",
+        MEDIA_MAX_REQUEST_BYTES: "200",
+        MEDIA_MAX_TEMP_BYTES: "110",
+        MEDIA_MIN_FREE_BYTES: "1",
+    },
+    async () => {
+        const storage = await validateStorage();
+        const release = await reserveStaging(storage);
+        try {
+            await assert.rejects(reserveStaging(storage, 20),status(503));
+        } finally {
+            release();
+        }
+        // Should now succeed because both
+        // reservations have been released.
+        const releaseAgain = await reserveStaging(storage);
+        releaseAgain();
+        releaseAgain(); // Idempotent release.
+    }
+)));

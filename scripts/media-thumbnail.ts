@@ -11,10 +11,8 @@ import { runMediaSubprocess } from "./media-subprocess";
 import { randomUUID } from "node:crypto";
 import { ProcessingError, processingLimits, processingSignal, checkProcessingCancellation, withProcessingJob } from "./processing-limits";
 
-
-import {
-    getMediaStorageRoot
-} from "./media-storage";
+import { getMediaStorageRoot } from "./media-storage";
+import { withThumbnailSlot } from "./thumbnail-queue";
 
 
 // Bound libvips worker parallelism in this Node process as well as job admission.
@@ -46,7 +44,7 @@ async function createThumbnailLocked(
     }
 
     checkProcessingCancellation();
-    const releaseBudget = await reserveStaging(storage);
+    const releaseBudget = await reserveStaging(storage, processingLimits().thumbnailBytes);
     try {
         const temporary = path.join(thumbnailDirectory, `.${mediaId}-${randomUUID()}.tmp.webp`);
         await storage.assertAvailable(mediaPath);
@@ -129,9 +127,85 @@ export async function deleteThumbnail(
     }
 }
 
-// Serialize cache generation with replacement/deletion so an old generator
-// cannot republish stale bytes after replacement invalidates the cache.
-export async function getOrCreateThumbnail(mediaId: number, mediaPath: string, fileType: "IMAGE" | "VIDEO", signal?: AbortSignal): Promise<string> {
+async function getCachedThumbnail(
+    mediaId: number,
+    mediaPath: string
+): Promise<string | null> {
+    const storage = await validateStorage();
+
+    await storage.assertAvailable(mediaPath);
+
+    const thumbnailPath = path.join(
+        storage.root,
+        ".thumbnails",
+        `${mediaId}.webp`
+    );
+
+    await storage.assertAvailable(thumbnailPath);
+
+    try {
+        const stat = await fs.stat(thumbnailPath);
+
+        if (
+            !stat.isFile() ||
+            stat.size === 0 ||
+            stat.size >= processingLimits().thumbnailBytes
+        ) {
+            throw new ProcessingError(
+                "Invalid cached thumbnail",
+                422
+            );
+        }
+
+        return thumbnailPath;
+    } catch (error) {
+        if (
+            (error as NodeJS.ErrnoException).code ===
+            "ENOENT"
+        ) {
+            return null;
+        }
+
+        throw error;
+    }
+}
+
+
+export async function getOrCreateThumbnail(
+    mediaId: number,
+    mediaPath: string,
+    fileType: "IMAGE" | "VIDEO",
+    signal?: AbortSignal
+): Promise<string> {
     assertMediaId(mediaId);
-    return withProcessingJob(signal, () => withDestinationLock(getMediaStorageRoot(), mediaPath, async () => createThumbnailLocked(mediaId, mediaPath, fileType)));
+
+    const root = getMediaStorageRoot();
+
+    // Cached thumbnails bypass the processing queue.
+    // Still use the destination lock for safety.
+    const cached = await withDestinationLock(
+        root,
+        mediaPath,
+        () => getCachedThumbnail(mediaId, mediaPath)
+    );
+
+    if (cached !== null) {
+        return cached;
+    }
+
+    // Wait for a thumbnail slot WITHOUT holding
+    // the destination lock.
+    return withThumbnailSlot(signal, () =>
+        withProcessingJob(signal, () =>
+            withDestinationLock(
+                root,
+                mediaPath,
+                () => createThumbnailLocked(
+                    mediaId,
+                    mediaPath,
+                    fileType
+                )
+            )
+        )
+    );
 }
