@@ -17,6 +17,7 @@ import {
     groupMediaByDate
 } from '@/lib/media-grouping';
 import { useGallerySelection } from "@/lib/use-gallery-selection";
+import { usePersistedGroup } from '@/hooks/use-persisted-group';
 
 import {
     LibraryMediaGrid,
@@ -46,6 +47,14 @@ type AlbumApiRow = {
 };
 
 
+const PHOTO_GROUP_OPTIONS = [
+    'All',
+    'Years',
+    'Months',
+    'Days',
+] as const;
+
+
 export function PhotosPage() {
     const loadVersion = useRef(0);
     const [thumbnailRevision, setThumbnailRevision] = useState(0);
@@ -57,7 +66,11 @@ export function PhotosPage() {
 
     const density = 'comfortable';
 
-    const [group, setGroup] = useState<GroupMode>('Months');
+    const [group, setGroup] = usePersistedGroup<GroupMode>(
+        'my-gallery:photos:timeline-group',
+        'Months',
+        PHOTO_GROUP_OPTIONS
+    );
 
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
@@ -619,7 +632,11 @@ export function FavoritesPage() {
 
     const [error, setError] = useState<string | null>(null);
 
-    const [group, setGroup] = useState<GroupMode>('All');
+    const [group, setGroup] = usePersistedGroup<GroupMode>(
+        'my-gallery:photos:timeline-group',
+        'All',
+        PHOTO_GROUP_OPTIONS
+    );
 
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 

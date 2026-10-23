@@ -7,8 +7,8 @@ import Link from "next/link";
 import { useRouter } from 'next/navigation';
 
 import { useBulkMedia } from "../lib/use-bulk-media";
-import { BulkMediaFeedback } from "./bulk-media-feedback";
 import { groupMediaByDate } from '@/lib/media-grouping';
+import { usePersistedGroup } from '@/hooks/use-persisted-group';
 
 import { Icon } from './icons';
 import { TripMediaPicker } from './trip-media-picker';
@@ -41,6 +41,13 @@ type TripResponse = {
     trip: TripRow;
     media: TripMediaRow[];
 };
+
+
+const TRIP_GROUP_OPTIONS = [
+    'All',
+    'Months',
+    'Days',
+] as const;
 
 
 export function TripDetail({
@@ -85,7 +92,11 @@ export function TripDetail({
     const [moveModalOpen, setMoveModalOpen] = useState(false);
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
-    const [group, setGroup] = useState<'All' | 'Months' | 'Days'>('All');
+    const [group, setGroup] = usePersistedGroup(
+        `my-gallery:trip:${tripId}:timeline-group`,
+        'All',
+        TRIP_GROUP_OPTIONS
+    );
 
 
     const router = useRouter();

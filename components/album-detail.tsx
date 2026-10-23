@@ -12,8 +12,8 @@ import Link from "next/link";
 import { useRouter } from 'next/navigation';
 
 import { useBulkMedia } from "../lib/use-bulk-media";
-import { BulkMediaFeedback } from "./bulk-media-feedback";
 import { groupMediaByDate } from '@/lib/media-grouping';
+import { usePersistedGroup } from '@/hooks/use-persisted-group';
 
 import { Icon } from './icons';
 import { AlbumMediaPicker } from "./album-media-picker";
@@ -47,6 +47,14 @@ type AlbumResponse = {
     album: AlbumRow;
     media: AlbumMediaRow[];
 };
+
+
+const ALBUM_GROUP_OPTIONS = [
+    'All',
+    'Years',
+    'Months',
+    'Days',
+] as const;
 
 
 export function AlbumDetail({
@@ -94,7 +102,11 @@ export function AlbumDetail({
     ] = useState<'move' | 'copy' | null>(null);
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
-    const [group, setGroup] = useState<'All' | 'Years' | 'Months' | 'Days'>('All');
+    const [group, setGroup] = usePersistedGroup(
+        `my-gallery:album:${albumId}:timeline-group`,
+        'All',
+        ALBUM_GROUP_OPTIONS
+    );
 
 
     const router = useRouter();
