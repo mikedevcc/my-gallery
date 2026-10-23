@@ -15,6 +15,7 @@ import {
 
 
 import { Icon } from './icons';
+import { MediaSelectionControl } from './media-selection-control';
 
 
 type MediaDetails = {
@@ -873,11 +874,14 @@ function formatDuration(
 }
 
 
+
 export function LibraryMediaGrid({
     items,
     density = 'comfortable',
     revision = 0,
     onToggleFavorite,
+    selectedMediaIds = [],
+    onToggleSelection,
 }: {
     items: LibraryMedia[];
     density?: string;
@@ -886,73 +890,94 @@ export function LibraryMediaGrid({
         mediaId: number,
         favoriteState: boolean
     ) => void;
+    selectedMediaIds?: number[];
+    onToggleSelection?: (mediaId: number) => void;
 }) {
+    const selectedIds = new Set(selectedMediaIds);
+
     return (
         <div
             className={`photo-grid ${
-                density === 'compact'
-                    ? 'compact'
-                    : ''
+                density === 'compact' ? 'compact' : ''
             }`}
         >
-            {items.map((item, index) => (
-                <div
-                    key={item.media_id}
-                    className="photo-library-tile"
-                >
-                    <Link
-                        href={`/photo/${item.media_id}`}
-                        scroll={false}
-                        className="photo-tile"
-                        aria-label={`View ${item.file_name}`}
+            {items.map((item, index) => {
+                const selected = selectedIds.has(item.media_id);
+
+                return (
+                    <div
+                        key={item.media_id}
+                        className={`photo-library-tile ${
+                            selected ? 'selected' : ''
+                        }`}
                     >
-                        <Image
-                            src={`/api/media/${item.media_id}/thumbnail?v=${revision}`}
-                            alt={item.file_name}
-                            fill
-                            sizes="(max-width: 700px) 50vw, (max-width: 1100px) 33vw, 25vw"
-                            unoptimized
-                            className="photo-img"
-                            priority={index < 3}
-                        />
+                        <Link
+                            href={`/photo/${item.media_id}`}
+                            scroll={false}
+                            className="photo-tile"
+                            aria-label={`View ${item.file_name}`}
+                        >
+                            <Image
+                                src={`/api/media/${item.media_id}/thumbnail?v=${revision}`}
+                                alt={item.file_name}
+                                fill
+                                sizes="(max-width: 700px) 50vw, (max-width: 1100px) 33vw, 25vw"
+                                unoptimized
+                                className="photo-img"
+                                priority={index < 3}
+                            />
 
-                        <span className="photo-overlay">
-                            <span>
-                                {item.file_name}
+                            <span className="photo-overlay">
+                                <span>
+                                    {item.file_name}
 
-                                <small>
-                                    {item.city_name ??
-                                        item.country_name ??
-                                        ''}
-                                </small>
+                                    <small>
+                                        {item.city_name ??
+                                            item.country_name ??
+                                            ''}
+                                    </small>
+                                </span>
                             </span>
-                        </span>
-                    </Link>
+                        </Link>
 
-                    <button
-                        type="button"
-                        className={
-                            item.favorite
-                                ? 'photo-favorite is-favorite'
-                                : 'photo-favorite'
-                        }
-                        onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
+                        {onToggleSelection && (
+                            <MediaSelectionControl
+                                selected={selected}
+                                mediaName={item.file_name}
+                                onToggle={() =>
+                                    onToggleSelection(item.media_id)
+                                }
+                            />
+                        )}
 
-                            onToggleFavorite(
-                                item.media_id,
-                                !item.favorite
-                            );
-                        }}
-                    >
-                        <Icon
-                            name="heart"
-                            size={18}
-                        />
-                    </button>
-                </div>
-            ))}
+                        <button
+                            type="button"
+                            className={
+                                item.favorite
+                                    ? 'photo-favorite is-favorite'
+                                    : 'photo-favorite'
+                            }
+                            aria-label={`${
+                                item.favorite
+                                    ? 'Remove from'
+                                    : 'Add to'
+                            } favorites: ${item.file_name}`}
+                            aria-pressed={item.favorite}
+                            onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+
+                                onToggleFavorite(
+                                    item.media_id,
+                                    !item.favorite
+                                );
+                            }}
+                        >
+                            <Icon name="heart" size={18} />
+                        </button>
+                    </div>
+                );
+            })}
         </div>
     );
 }

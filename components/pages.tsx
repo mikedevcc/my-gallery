@@ -4,6 +4,7 @@ import {
     useEffect,
     useState,
     useRef,
+    useCallback,
 } from 'react';
 
 
@@ -15,6 +16,7 @@ import {
     type GroupMode,
     groupMediaByDate
 } from '@/lib/media-grouping';
+import { useGallerySelection } from "@/lib/use-gallery-selection";
 
 import {
     LibraryMediaGrid,
@@ -24,6 +26,8 @@ import { TripGrid, AlbumGrid } from './cards';
 import { Icon } from './icons';
 import { CreateTripModal } from './create-trip-modal';
 import { CreateAlbumModal } from './create-album-modal';
+import { DeleteMediaModal } from "./delete-media-modal";
+import { GalleryDestinationModal } from "./gallery-destination-modal";
 
 
 type TripApiRow = {
@@ -55,6 +59,20 @@ export function PhotosPage() {
 
     const [group, setGroup] = useState<GroupMode>('Months');
 
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+
+    const [destinationModal, setDestinationModal] = useState<{
+        kind: "trip" | "album";
+        ids: number[];
+    } | null>(null);
+
+    const {
+        selectedMediaIds,
+        toggleSelection,
+        clearSelection,
+        reconcileSelection,
+        removeSelected,
+    } = useGallerySelection();
 
     async function toggleFavoriteMedia(
         mediaId: number,
@@ -106,7 +124,10 @@ export function PhotosPage() {
 
                 const result = await response.json() as LibraryMedia[];
 
-                if (version === loadVersion.current) { setMedia(result); setError(null); }
+                if (version === loadVersion.current) {
+                    setMedia(result); setError(null);
+                    reconcileSelection(result.map(item => item.media_id));
+                }
             }
             catch (error) {
                 if (version === loadVersion.current) setError(
@@ -121,7 +142,7 @@ export function PhotosPage() {
         }
 
         void loadMedia();
-    }, []);
+    }, [reconcileSelection]);
 
 
     useEffect(() => {
@@ -142,7 +163,10 @@ export function PhotosPage() {
                     const result =
                         await response.json() as LibraryMedia[];
 
-                    if (version === loadVersion.current) { setMedia(result); setError(null); }
+                    if (version === loadVersion.current) {
+                        setMedia(result); setError(null);
+                        reconcileSelection(result.map(item => item.media_id));
+                    }
                 }
                 catch (error) {
                     console.error(
@@ -167,7 +191,7 @@ export function PhotosPage() {
                 handleLibraryUpdated
             );
         };
-    }, []);
+    }, [reconcileSelection]);
 
     
     const groupedSections = groupMediaByDate(media, group);
@@ -259,6 +283,56 @@ export function PhotosPage() {
             </div>
 
 
+            {selectedMediaIds.length > 0 && (
+                <div className="trip-selection-bar">
+                    <div className="trip-selection-summary">
+                        <span>{selectedMediaIds.length} selected</span>
+
+                        <button
+                            type="button"
+                            onClick={clearSelection}
+                        >
+                            Unselect all
+                        </button>
+                    </div>
+
+                    <div className="trip-selection-actions">
+                        <button
+                            type="button"
+                            onClick={() =>
+                                setDestinationModal({
+                                    kind: "trip",
+                                    ids: [...selectedMediaIds],
+                                })
+                            }
+                        >
+                            Move to Trip
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() =>
+                                setDestinationModal({
+                                    kind: "album",
+                                    ids: [...selectedMediaIds],
+                                })
+                            }
+                        >
+                            Add to Album
+                        </button>
+
+                        <button
+                            type="button"
+                            className="danger"
+                            onClick={() => setDeleteModalOpen(true)}
+                        >
+                            Delete
+                        </button>
+                    </div>
+                </div>
+            )}
+
+
             {media.length === 0 ? (
                 <EmptyState
                     title="No media yet"
@@ -291,10 +365,40 @@ export function PhotosPage() {
                                 items={items}
                                 density={density}
                                 onToggleFavorite={toggleFavoriteMedia}
+                                selectedMediaIds={selectedMediaIds}
+                                onToggleSelection={toggleSelection}
                             />
                         </section>
                     )
                 )
+            )}
+
+
+            <DeleteMediaModal
+                open={deleteModalOpen}
+                mediaIds={selectedMediaIds}
+                onClose={() => setDeleteModalOpen(false)}
+                onDeleted={(confirmedIds) => {
+                    const deleted = new Set(confirmedIds);
+
+                    setMedia(current =>
+                        current.filter(item => !deleted.has(item.media_id))
+                    );
+
+                    removeSelected(confirmedIds);
+                }}
+            />
+
+
+            {destinationModal && (
+                <GalleryDestinationModal
+                    kind={destinationModal.kind}
+                    mediaIds={destinationModal.ids}
+                    onClose={() => setDestinationModal(null)}
+                    onConfirmed={(confirmedIds) => {
+                        removeSelected(confirmedIds);
+                    }}
+                />
             )}
         </>
     );
@@ -516,35 +620,46 @@ export function FavoritesPage() {
 
     const [group, setGroup] = useState<GroupMode>('All');
 
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
-    async function reloadMedia() {
+    const [destinationModal, setDestinationModal] = useState<{
+    kind: "trip" | "album";
+    ids: number[];
+} | null>(null);
+
+    const {
+        selectedMediaIds,
+        toggleSelection,
+        clearSelection,
+        reconcileSelection,
+        removeSelected,
+    } = useGallerySelection();
+
+
+    const reloadMedia = useCallback(async () => {
         const version = ++loadVersion.current;
+
         try {
-            const response =
-                await fetch(
-                    '/api/media?scope=all'
-                );
+            const response = await fetch('/api/media?scope=all');
 
-            if (!response.ok) {
-                return;
-            }
+            if (!response.ok) return;
 
-            const result =
-                await response.json() as LibraryMedia[];
+            const result = await response.json() as LibraryMedia[];
+            const favorites = result.filter(item => item.favorite === true);
 
             if (version === loadVersion.current) {
-                setMedia(result.filter(item => item.favorite === true));
+                setMedia(favorites);
+                reconcileSelection(favorites.map(item => item.media_id));
                 setError(null);
             }
+        } catch (error) {
+            console.error('Failed to refresh library:', error);
+        } finally {
+            if (version === loadVersion.current) {
+                setLoading(false);
+            }
         }
-        catch (error) {
-            console.error(
-                'Failed to refresh library:',
-                error
-            );
-        }
-        finally { if (version === loadVersion.current) setLoading(false); }
-    }
+    }, [reconcileSelection]);
 
 
     async function toggleFavoriteMedia(
@@ -600,7 +715,10 @@ export function FavoritesPage() {
                 const result = await response.json() as LibraryMedia[];
 
                 if (version === loadVersion.current) {
-                    setMedia(result.filter(item => item.favorite === true));
+                    const favorites = result.filter(item => item.favorite === true);
+
+                    setMedia(favorites);
+                    reconcileSelection(favorites.map(item => item.media_id));
                     setError(null);
                 }
             }
@@ -617,7 +735,7 @@ export function FavoritesPage() {
         }
 
         void loadMedia();
-    }, []);
+    }, [reconcileSelection]);
 
 
     useEffect(() => {
@@ -639,7 +757,7 @@ export function FavoritesPage() {
                 handleLibraryUpdated
             );
         };
-    }, []);
+    }, [reloadMedia]);
 
 
     const groupedSections = groupMediaByDate(media, group);
@@ -715,6 +833,57 @@ export function FavoritesPage() {
                 </span>
             </div>
 
+
+            {selectedMediaIds.length > 0 && (
+                <div className="trip-selection-bar">
+                    <div className="trip-selection-summary">
+                        <span>{selectedMediaIds.length} selected</span>
+
+                        <button
+                            type="button"
+                            onClick={clearSelection}
+                        >
+                            Unselect all
+                        </button>
+                    </div>
+
+                    <div className="trip-selection-actions">
+                        <button
+                            type="button"
+                            onClick={() =>
+                                setDestinationModal({
+                                    kind: "trip",
+                                    ids: [...selectedMediaIds],
+                                })
+                            }
+                        >
+                            Move to Trip
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() =>
+                                setDestinationModal({
+                                    kind: "album",
+                                    ids: [...selectedMediaIds],
+                                })
+                            }
+                        >
+                            Add to Album
+                        </button>
+
+                        <button
+                            type="button"
+                            className="danger"
+                            onClick={() => setDeleteModalOpen(true)}
+                        >
+                            Delete
+                        </button>
+                    </div>
+                </div>
+            )}
+
+
             {media.length === 0 ? (
                 <EmptyState
                     title="No favorites yet"
@@ -746,10 +915,40 @@ export function FavoritesPage() {
                                 revision={thumbnailRevision}
                                 items={items}
                                 onToggleFavorite={toggleFavoriteMedia}
+                                selectedMediaIds={selectedMediaIds}
+                                onToggleSelection={toggleSelection}
                             />
                         </section>
                     )
                 )
+            )}
+
+
+            <DeleteMediaModal
+                open={deleteModalOpen}
+                mediaIds={selectedMediaIds}
+                onClose={() => setDeleteModalOpen(false)}
+                onDeleted={(confirmedIds) => {
+                    const deleted = new Set(confirmedIds);
+
+                    setMedia(current =>
+                        current.filter(item => !deleted.has(item.media_id))
+                    );
+
+                    removeSelected(confirmedIds);
+                }}
+            />
+
+
+            {destinationModal && (
+                <GalleryDestinationModal
+                    kind={destinationModal.kind}
+                    mediaIds={destinationModal.ids}
+                    onClose={() => setDestinationModal(null)}
+                    onConfirmed={(confirmedIds) => {
+                        removeSelected(confirmedIds);
+                    }}
+                />
             )}
         </>
     )

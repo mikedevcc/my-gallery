@@ -1,29 +1,89 @@
 export type BulkOutcome = "confirmed" | "failed" | "uncertain" | "pending" | "running";
 export type BulkItem = { id: number; outcome: BulkOutcome; unchanged?: boolean };
-export type BulkOperation = { kind: "delete" | "album-add" | "album-remove" | "trip-remove"; collectionId?: number };
+export type BulkOperation = {
+    kind:
+        | "delete"
+        | "album-add"
+        | "album-remove"
+        | "trip-add"
+        | "trip-remove";
+    collectionId?: number;
+};
 
-export async function requestBulkItem(operation: BulkOperation, id: number): Promise<BulkItem> {
-    const url = operation.kind === "delete" ? `/api/media/${id}`
-        : `/api/${operation.kind === "trip-remove" ? "trips" : "albums"}/${operation.collectionId}/media`;
+
+export async function requestBulkItem(
+    operation: BulkOperation,
+    id: number
+): Promise<BulkItem> {
+    const isDelete = operation.kind === "delete";
+    const isTrip = operation.kind.startsWith("trip-");
+    const isAdd = operation.kind.endsWith("-add");
+
+    const url = isDelete
+        ? `/api/media/${id}`
+        : `/api/${isTrip ? "trips" : "albums"}/${operation.collectionId}/media`;
+
     try {
-        const response = await fetch(url, operation.kind === "delete" ? { method: "DELETE" } : {
-            method: operation.kind === "album-add" ? "POST" : "DELETE",
-            headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mediaId: id }),
-        });
-        if (response.redirected) return { id, outcome: "uncertain" };
+        const response = await fetch(
+            url,
+            isDelete
+                ? { method: "DELETE" }
+                : {
+                    method: isAdd ? "POST" : "DELETE",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ mediaId: id }),
+                }
+        );
+
+        if (response.redirected) {
+            return { id, outcome: "uncertain" };
+        }
+
         if (!response.ok) {
-            // These routes reject these client errors without committing a mutation.
-            // Timeouts, 5xx and unexpected statuses may follow a committed operation.
-            return { id, outcome: [400, 401, 403, 404, 409, 413, 415, 422].includes(response.status) ? "failed" : "uncertain" };
+            return {
+                id,
+                outcome: [400, 401, 403, 404, 409, 413, 415, 422]
+                    .includes(response.status)
+                    ? "failed"
+                    : "uncertain",
+            };
         }
+
         const body = await response.json();
-        if (operation.kind === "album-add") {
-            if (body?.addedCount !== 0 && body?.addedCount !== 1) return { id, outcome: "uncertain" };
-            return { id, outcome: "confirmed", unchanged: body.addedCount === 0 };
+
+        if (isAdd) {
+            if (body?.addedCount !== 0 && body?.addedCount !== 1) {
+                return { id, outcome: "uncertain" };
+            }
+
+            // Trip assignment must actually change membership.
+            // Album addition may legitimately be a no-op when already added.
+            if (isTrip && body.addedCount !== 1) {
+                return { id, outcome: "uncertain" };
+            }
+
+            return {
+                id,
+                outcome: "confirmed",
+                unchanged: body.addedCount === 0,
+            };
         }
-        const message = operation.kind === "delete" ? "Media deleted" : operation.kind === "album-remove" ? "Media removed from album" : "Media removed from trip";
-        return { id, outcome: body?.message === message ? "confirmed" : "uncertain" };
-    } catch { return { id, outcome: "uncertain" }; }
+
+        const expectedMessage = isDelete
+            ? "Media deleted"
+            : isTrip
+                ? "Media removed from trip"
+                : "Media removed from album";
+
+        return {
+            id,
+            outcome: body?.message === expectedMessage
+                ? "confirmed"
+                : "uncertain",
+        };
+    } catch {
+        return { id, outcome: "uncertain" };
+    }
 }
 
 // One explicit per-item batch/retry session. It never splits transactional APIs.
