@@ -8,7 +8,9 @@ import {
     useSearchParams,
 } from 'next/navigation';
 import {
+    useCallback,
     useEffect,
+    useRef,
     useState,
     useSyncExternalStore,
 } from 'react';
@@ -53,27 +55,15 @@ type MediaDetails = {
     bitrate: number | null;
 };
 
-type TripMediaRow = {
+type ViewerMediaItem = {
     media_id: number;
     file_name: string;
     file_type: 'IMAGE' | 'VIDEO';
-    path: string;
-    date_taken: string | null;
-    capture_local?: string | null;
-    capture_offset_minutes?: number | null;
-    width: number | null;
-    height: number | null;
-    favorite: boolean;
+    favorite?: boolean;
 };
 
-type TripResponse = {
-    trip: {
-        trip_id: number;
-        trip_name: string;
-        cover_media_id: number | null;
-    };
-
-    media: TripMediaRow[];
+type CollectionResponse = {
+    media: ViewerMediaItem[];
 };
 
 export type LibraryMedia = {
@@ -101,11 +91,15 @@ export function Viewer({
     const router = useRouter();
     const searchParams = useSearchParams();
 
+    const [selectedId, setSelectedId] = useState(() => Number(id));
+
     const tripId = searchParams.get('tripId');
+    const albumId = searchParams.get('albumId');
+    const scope = searchParams.get('scope');
 
     const [media, setMedia] = useState<MediaDetails | null>(null);
 
-    const [tripMedia, setTripMedia] = useState<TripMediaRow[]>([]);
+    const [collectionMedia, setCollectionMedia] = useState<ViewerMediaItem[]>([]);
 
     const [loading, setLoading] = useState(true);
 
@@ -124,6 +118,88 @@ export function Viewer({
     const [shareError, setShareError] = useState('');
 
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+
+
+    const filmstripRef = useRef<HTMLDivElement>(null);
+    const viewerRef = useRef<HTMLDivElement>(null);
+
+    const [isFullscreen, setIsFullscreen] = useState(false);
+    const [showTopControls, setShowTopControls] = useState(false);
+    const [showBottomControls, setShowBottomControls] = useState(false);
+    const [showSideControls, setShowSideControls] = useState(false);
+    const [isImmersive, setIsImmersive] = useState(false);
+
+    const lastWheelNavigationRef = useRef(0);
+
+
+    useEffect(() => {
+        function handleFullscreenChange() {
+            const active =
+                document.fullscreenElement === viewerRef.current;
+
+            setIsFullscreen(active);
+
+            // Reset controls when the fullscreen state changes.
+            setShowTopControls(false);
+            setShowBottomControls(false);
+            setShowSideControls(false);
+        }
+
+        document.addEventListener(
+            'fullscreenchange',
+            handleFullscreenChange
+        );
+
+        return () => {
+            document.removeEventListener(
+                'fullscreenchange',
+                handleFullscreenChange
+            );
+        };
+    }, []);
+
+
+    useEffect(() => {
+        const strip = filmstripRef.current;
+        if (!strip) return;
+
+        const selected = strip.querySelector<HTMLElement>(
+            '.film-thumb.selected'
+        );
+
+        if (!selected) return;
+
+        const stripRect = strip.getBoundingClientRect();
+        const thumbRect = selected.getBoundingClientRect();
+
+        const selectedCenter =
+            thumbRect.left + thumbRect.width / 2;
+
+        const visibleCenter =
+            stripRect.left + stripRect.width / 2;
+
+        // Calculate the absolute target based on the current
+        // layout and scroll position.
+        const target =
+            strip.scrollLeft +
+            selectedCenter -
+            visibleCenter;
+
+        const maxScroll = Math.max(
+            0,
+            strip.scrollWidth - strip.clientWidth
+        );
+
+        const clampedTarget = Math.max(
+            0,
+            Math.min(target, maxScroll)
+        );
+
+        strip.scrollTo({
+            left: clampedTarget,
+            behavior: 'smooth',
+        });
+    }, [selectedId, collectionMedia]);
 
 
     useEffect(() => {
@@ -174,13 +250,17 @@ export function Viewer({
 
     
     useEffect(() => {
+        const controller = new AbortController();
+
         async function loadMedia() {
             setLoading(true);
             setError(null);
 
             try {
-                const response =
-                    await fetch(`/api/media/${id}`);
+                const response = await fetch(
+                    `/api/media/${selectedId}`,
+                    { signal: controller.signal }
+                );
 
                 if (!response.ok) {
                     throw new Error(
@@ -191,60 +271,88 @@ export function Viewer({
                 const result =
                     await response.json() as MediaDetails;
 
+                if (controller.signal.aborted) return;
+
                 setMedia(result);
                 setFavorite(result.favorite);
-            }
-            catch (error) {
+            } catch (error) {
+                if (controller.signal.aborted) return;
+
                 setError(
                     error instanceof Error
                         ? error.message
                         : 'Failed to load media'
                 );
-            }
-            finally {
-                setLoading(false);
+            } finally {
+                if (!controller.signal.aborted) {
+                    setLoading(false);
+                }
             }
         }
 
         void loadMedia();
-    }, [id]);
+
+        return () => controller.abort();
+    }, [selectedId]);
 
 
     useEffect(() => {
-        if (tripId === null) {
-            return;
-        }
+        const controller = new AbortController();
 
-        async function loadTripMedia() {
+        async function loadCollection() {
             try {
-                const response =
-                    await fetch(`/api/trips/${tripId}`);
+                let url = '/api/media?scope=all';
 
-                if (!response.ok) {
-                    return;
+                if (tripId !== null) {
+                    url = `/api/trips/${encodeURIComponent(tripId)}`;
+                } else if (albumId !== null) {
+                    url = `/api/albums/${encodeURIComponent(albumId)}`;
                 }
 
-                const result =
-                    await response.json() as TripResponse;
+                const response = await fetch(url, {
+                    signal: controller.signal,
+                });
 
-                setTripMedia(result.media);
-            }
-            catch (error) {
-                console.error(
-                    'Failed to load trip media:',
-                    error
-                );
+                if (!response.ok) {
+                    throw new Error(
+                        `Failed to load collection (${response.status})`
+                    );
+                }
+
+                const result: ViewerMediaItem[] | CollectionResponse =
+                    await response.json();
+
+                const items = Array.isArray(result)
+                    ? result
+                    : result.media;
+
+                const visibleItems =
+                    tripId === null &&
+                    albumId === null &&
+                    scope === 'favorites'
+                        ? items.filter(item => item.favorite === true)
+                        : items;
+
+                if (!controller.signal.aborted) {
+                    setCollectionMedia(visibleItems);
+                }
+            } catch (error) {
+                if (!controller.signal.aborted) {
+                    console.error(
+                        'Failed to load viewer collection:',
+                        error
+                    );
+                }
             }
         }
 
-        void loadTripMedia();
-    }, [tripId]);
+        void loadCollection();
+
+        return () => controller.abort();
+    }, [tripId, albumId, scope]);
 
     
-    const activeTripMedia =
-    tripId === null
-        ? []
-        : tripMedia;
+    const activeMedia = collectionMedia;
 
 
     useEffect(() => {
@@ -256,31 +364,45 @@ export function Viewer({
     }, []);
 
 
-    const currentIndex =
-        activeTripMedia.findIndex(
-            item =>
-                item.media_id === Number(id)
+    const currentIndex = activeMedia.findIndex(
+        item => item.media_id === selectedId
+    );
+
+
+    const openMedia = useCallback((mediaId: number) => {
+        if (mediaId === selectedId) return;
+
+        // Update the selected image without unmounting Viewer.
+        setSelectedId(mediaId);
+
+        // Preserve the originating collection in the URL.
+        const query = new URLSearchParams();
+
+        if (tripId !== null) {
+            query.set('tripId', tripId);
+        } else if (albumId !== null) {
+            query.set('albumId', albumId);
+        } else {
+            query.set(
+                'scope',
+                scope === 'favorites' ? 'favorites' : 'all'
+            );
+        }
+
+        const url = `/photo/${mediaId}?${query.toString()}`;
+
+        // Update the address bar without starting a new route navigation.
+        window.history.replaceState(
+            window.history.state,
+            '',
+            url
         );
+    }, [selectedId, tripId, albumId, scope]);
 
 
-    function openMedia(mediaId: number) {
-        const query =
-            tripId !== null
-                ? `?tripId=${tripId}`
-                : '';
-
-        router.replace(
-            `/photo/${mediaId}${query}`,
-            {
-                scroll: false,
-            }
-        );
-    }
-
-
-    function move(direction: number) {
+    const move = useCallback((direction: number) => {
         if (
-            activeTripMedia.length === 0 ||
+            activeMedia.length <= 1 ||
             currentIndex === -1
         ) {
             return;
@@ -290,75 +412,182 @@ export function Viewer({
             (
                 currentIndex +
                 direction +
-                activeTripMedia.length
-            ) % activeTripMedia.length;
+                activeMedia.length
+            ) % activeMedia.length;
 
-        openMedia(
-            activeTripMedia[nextIndex].media_id
-        );
-    }
+        openMedia(activeMedia[nextIndex].media_id);
+    }, [activeMedia, currentIndex, openMedia]);
+
+
+    const handleViewerWheel = useCallback(
+        (event: React.WheelEvent<HTMLDivElement>) => {
+            // Preserve modified scrolling.
+            if (
+                event.shiftKey ||
+                event.ctrlKey ||
+                event.altKey ||
+                event.metaKey
+            ) {
+                return;
+            }
+
+            if (deleteModalOpen || activeMedia.length <= 1) {
+                return;
+            }
+
+            // Ignore horizontal gestures.
+            if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+                return;
+            }
+
+            if (event.deltaY === 0) {
+                return;
+            }
+
+            // Prevent the page from scrolling.
+            event.preventDefault();
+
+            const now = performance.now();
+            const cooldownMs = 200;
+
+            if (
+                now - lastWheelNavigationRef.current <
+                cooldownMs
+            ) {
+                return;
+            }
+
+            lastWheelNavigationRef.current = now;
+
+            // Positive deltaY = scroll down = next image.
+            move(event.deltaY > 0 ? 1 : -1);
+        },
+        [activeMedia.length, deleteModalOpen, move]
+    );
 
 
     useEffect(() => {
-        function handleKeyDown(
-            event: KeyboardEvent
-        ) {
-            if (event.key === 'Escape') {
-                router.back();
+        function handleKeyDown(event: KeyboardEvent) {
+            // Do not navigate while the delete modal is open.
+            if (deleteModalOpen) {
+                return;
             }
 
+            const target = event.target;
+
             if (
-                event.key === 'ArrowRight' &&
-                activeTripMedia.length > 1
+                target instanceof HTMLElement &&
+                (
+                    target.isContentEditable ||
+                    ['INPUT', 'TEXTAREA', 'SELECT'].includes(
+                        target.tagName
+                    )
+                )
             ) {
-                move(1);
+                return;
             }
 
-            if (
-                event.key === 'ArrowLeft' &&
-                activeTripMedia.length > 1
-            ) {
-                move(-1);
+            // Avoid triggering shortcuts involving Ctrl, Alt or Meta.
+            if (event.ctrlKey || event.altKey || event.metaKey) {
+                return;
             }
 
-            if (
-                (event.ctrlKey ||
-                    event.metaKey) &&
-                event.key.toLowerCase() === 'i'
-            ) {
-                event.preventDefault();
+            switch (event.key) {
+                case 'Escape':
+                    event.preventDefault();
 
-                setInfo(
-                    current => !current
-                );
+                    if (isImmersive) {
+                        setIsImmersive(false);
+                    } else if (window.history.length > 1) {
+                        router.back();
+                    } else {
+                        router.push('/');
+                    }
+                    break;
+
+                case 'ArrowRight':
+                    if (activeMedia.length > 1) {
+                        event.preventDefault();
+                        move(1);
+                    }
+                    break;
+
+                case 'ArrowLeft':
+                    if (activeMedia.length > 1) {
+                        event.preventDefault();
+                        move(-1);
+                    }
+                    break;
+
+                case 'i':
+                case 'I':
+                    event.preventDefault();
+                    setInfo(current => !current);
+                    break;
+
+                case 'f':
+                case 'F':
+                    event.preventDefault();
+                    setIsImmersive(current => !current);
+                    break;
             }
         }
 
-        window.addEventListener(
-            'keydown',
-            handleKeyDown
-        );
+        window.addEventListener('keydown', handleKeyDown);
 
         return () => {
-            window.removeEventListener(
-                'keydown',
-                handleKeyDown
-            );
+            window.removeEventListener('keydown', handleKeyDown);
         };
-    });
+    }, [
+        activeMedia,
+        isImmersive,
+        deleteModalOpen,
+        move,
+        router
+    ]);
+
+
+    function handleViewerPointerMove(
+        event: React.PointerEvent<HTMLDivElement>
+    ) {
+        if (!isFullscreen) return;
+
+        const rect = event.currentTarget.getBoundingClientRect();
+
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+
+        const edgeThreshold = 110;
+
+        setShowTopControls(y <= edgeThreshold);
+        setShowBottomControls(
+            y >= rect.height - edgeThreshold
+        );
+        setShowSideControls(
+            x <= edgeThreshold ||
+            x >= rect.width - edgeThreshold
+        );
+    }
+
+    function handleViewerPointerLeave() {
+        if (!isFullscreen) return;
+
+        setShowTopControls(false);
+        setShowBottomControls(false);
+        setShowSideControls(false);
+    }
 
 
     function back() {
         if (window.history.length > 1) {
             router.back();
-        }
-        else {
+        } else {
             router.push('/');
         }
     }
 
 
-    if (loading) {
+    if (loading && media === null) {
         return (
             <div
                 className="viewer"
@@ -373,7 +602,7 @@ export function Viewer({
     }
 
 
-    if (error || !media) {
+    if (!media) {
         return (
             <div
                 className="viewer"
@@ -401,15 +630,17 @@ export function Viewer({
     }
 
 
+    const isCurrentMedia = media.media_id === selectedId;
+
+
     const position =
         currentIndex >= 0
             ? currentIndex + 1
             : 1;
 
-    const total =
-        activeTripMedia.length > 0
-            ? activeTripMedia.length
-            : 1;
+    const total = activeMedia.length > 0
+    ? activeMedia.length
+    : 1;
 
 
     const fileUrl =
@@ -456,10 +687,19 @@ export function Viewer({
     return (
         <>
             <div
-                className="viewer"
+                ref={viewerRef}
+                className={[
+                    'viewer',
+                    isImmersive ? 'viewer-immersive' : '',
+                    isImmersive && showTopControls ? 'show-top-controls' : '',
+                    isImmersive && showBottomControls ? 'show-bottom-controls' : '',
+                    isImmersive && showSideControls ? 'show-side-controls' : '',
+                ].filter(Boolean).join(' ')}
                 role="dialog"
                 aria-modal="true"
                 aria-label={`Media viewer: ${media.file_name}`}
+                onPointerMove={handleViewerPointerMove}
+                onPointerLeave={handleViewerPointerLeave}
             >
                 <div className="viewer-main">
 
@@ -554,8 +794,8 @@ export function Viewer({
                                 className={`viewer-icon ${info ? 'active' : ''}`}
                                 aria-label={info ? 'Hide information' : 'Show information'}
                                 aria-pressed={info}
-                                aria-keyshortcuts="Control+I"
-                                title="Information (Ctrl + I)"
+                                aria-keyshortcuts="I"
+                                title="Information (I)"
                                 onClick={() => setInfo(current => !current)}
                             >
                                 <Icon name="info" />
@@ -575,11 +815,29 @@ export function Viewer({
                     </div>
 
 
+                    {isFullscreen && (
+                        <button
+                            type="button"
+                            className="viewer-fullscreen-exit"
+                            aria-label="Exit fullscreen"
+                            title="Exit fullscreen (F)"
+                            onClick={() => {
+                                setIsImmersive(false);
+                            }}
+                        >
+                            <Icon name="close" size={24} />
+                        </button>
+                    )}
+
+
                     {shareError && <p role="alert">{shareError}</p>}
 
-                    <div className="viewer-stage">
+                    <div
+                        className="viewer-stage"
+                        onWheel={handleViewerWheel}
+                    >
 
-                        {activeTripMedia.length > 1 && (
+                        {activeMedia.length > 1 && (
                             <button
                                 className="viewer-arrow left"
                                 aria-label="Previous media"
@@ -595,13 +853,18 @@ export function Viewer({
                         )}
 
 
-                        {media.file_type ===
-                        'IMAGE' ? (
+                        {error ? (
+                            <div className="viewer-media-status" role="alert">
+                                <p>{error}</p>
+                            </div>
+                        ) : !isCurrentMedia ? (
+                            <div className="viewer-media-status" role="status">
+                                <p>Loading media...</p>
+                            </div>
+                        ) : media.file_type === 'IMAGE' ? (
                             <Image
                                 src={fileUrl}
-                                alt={
-                                    media.file_name
-                                }
+                                alt={media.file_name}
                                 fill
                                 sizes="100vw"
                                 unoptimized
@@ -612,20 +875,17 @@ export function Viewer({
                                 src={fileUrl}
                                 controls
                                 playsInline
-                                poster={
-                                    thumbnailUrl
-                                }
+                                poster={thumbnailUrl}
                                 style={{
                                     width: '100%',
                                     height: '100%',
-                                    objectFit:
-                                        'contain',
+                                    objectFit: 'contain',
                                 }}
                             />
                         )}
 
 
-                        {activeTripMedia.length > 1 && (
+                        {activeMedia.length > 1 && (
                             <button
                                 className="viewer-arrow right"
                                 aria-label="Next media"
@@ -643,50 +903,48 @@ export function Viewer({
                     </div>
 
 
-                    {activeTripMedia.length > 0 && (
+                    {activeMedia.length > 0 && (
                         <div
+                            ref={filmstripRef}
                             className="filmstrip"
                             aria-label="Media thumbnails"
                         >
-                            {activeTripMedia.map(
-                                item => {
-                                    const selected =
-                                        item.media_id ===
-                                        media.media_id;
+                            {activeMedia.map(item => {
+                                const selected =
+                                    item.media_id === selectedId;
 
-                                    return (
-                                        <button
-                                            key={
+                                return (
+                                    <button
+                                        key={
+                                            item.media_id
+                                        }
+                                        className={`film-thumb ${
+                                            selected
+                                                ? 'selected'
+                                                : ''
+                                        }`}
+                                        onClick={() =>
+                                            openMedia(
                                                 item.media_id
-                                            }
-                                            className={`film-thumb ${
-                                                selected
-                                                    ? 'selected'
-                                                    : ''
-                                            }`}
-                                            onClick={() =>
-                                                openMedia(
-                                                    item.media_id
-                                                )
-                                            }
-                                            aria-label={`View ${item.file_name}`}
-                                            aria-current={
-                                                selected
-                                                    ? 'true'
-                                                    : undefined
-                                            }
-                                        >
-                                            <Image
-                                                src={`/api/media/${item.media_id}/thumbnail`}
-                                                alt=""
-                                                fill
-                                                sizes="72px"
-                                                unoptimized
-                                            />
-                                        </button>
-                                    );
-                                }
-                            )}
+                                            )
+                                        }
+                                        aria-label={`View ${item.file_name}`}
+                                        aria-current={
+                                            selected
+                                                ? 'true'
+                                                : undefined
+                                        }
+                                    >
+                                        <Image
+                                            src={`/api/media/${item.media_id}/thumbnail`}
+                                            alt=""
+                                            fill
+                                            sizes="72px"
+                                            unoptimized
+                                        />
+                                    </button>
+                                );
+                            })}
                         </div>
                     )}
 
@@ -952,6 +1210,7 @@ export function LibraryMediaGrid({
     onToggleFavorite,
     selectedMediaIds = [],
     onToggleSelection,
+    scope = 'all',
 }: {
     items: LibraryMedia[];
     density?: string;
@@ -962,6 +1221,7 @@ export function LibraryMediaGrid({
     ) => void;
     selectedMediaIds?: number[];
     onToggleSelection?: (mediaId: number) => void;
+    scope?: 'all' | 'favorites';
 }) {
     const selectedIds = new Set(selectedMediaIds);
 
@@ -982,7 +1242,7 @@ export function LibraryMediaGrid({
                         }`}
                     >
                         <Link
-                            href={`/photo/${item.media_id}`}
+                            href={`/photo/${item.media_id}?scope=${scope}`}
                             scroll={false}
                             className="photo-tile"
                             aria-label={`View ${item.file_name}`}

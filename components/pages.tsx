@@ -361,6 +361,7 @@ export function PhotosPage() {
                             </div>
 
                             <LibraryMediaGrid
+                                scope="all"
                                 revision={thumbnailRevision}
                                 items={items}
                                 density={density}
@@ -912,6 +913,7 @@ export function FavoritesPage() {
                             </div>
 
                             <LibraryMediaGrid
+                                scope="favorites"
                                 revision={thumbnailRevision}
                                 items={items}
                                 onToggleFavorite={toggleFavoriteMedia}
