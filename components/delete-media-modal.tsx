@@ -19,7 +19,15 @@ export function DeleteMediaModal({
     const bulk = useBulkMedia("delete");
     const deleting = bulk.busy;
     if (!open) return null;
-    async function deleteMedia() { await bulk.run(mediaIds, onDeleted); }
+    async function deleteMedia() {
+        const result = await bulk.run(mediaIds, onDeleted);
+
+        if (result?.allConfirmed) {
+        onClose();
+    }
+
+    }
+
 
     return (
         <div className="delete-media-backdrop">
