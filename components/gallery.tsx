@@ -123,40 +123,9 @@ export function Viewer({
     const filmstripRef = useRef<HTMLDivElement>(null);
     const viewerRef = useRef<HTMLDivElement>(null);
 
-    const [isFullscreen, setIsFullscreen] = useState(false);
-    const [showTopControls, setShowTopControls] = useState(false);
-    const [showBottomControls, setShowBottomControls] = useState(false);
-    const [showSideControls, setShowSideControls] = useState(false);
     const [isImmersive, setIsImmersive] = useState(false);
 
     const lastWheelNavigationRef = useRef(0);
-
-
-    useEffect(() => {
-        function handleFullscreenChange() {
-            const active =
-                document.fullscreenElement === viewerRef.current;
-
-            setIsFullscreen(active);
-
-            // Reset controls when the fullscreen state changes.
-            setShowTopControls(false);
-            setShowBottomControls(false);
-            setShowSideControls(false);
-        }
-
-        document.addEventListener(
-            'fullscreenchange',
-            handleFullscreenChange
-        );
-
-        return () => {
-            document.removeEventListener(
-                'fullscreenchange',
-                handleFullscreenChange
-            );
-        };
-    }, []);
 
 
     useEffect(() => {
@@ -547,37 +516,6 @@ export function Viewer({
     ]);
 
 
-    function handleViewerPointerMove(
-        event: React.PointerEvent<HTMLDivElement>
-    ) {
-        if (!isFullscreen) return;
-
-        const rect = event.currentTarget.getBoundingClientRect();
-
-        const x = event.clientX - rect.left;
-        const y = event.clientY - rect.top;
-
-        const edgeThreshold = 110;
-
-        setShowTopControls(y <= edgeThreshold);
-        setShowBottomControls(
-            y >= rect.height - edgeThreshold
-        );
-        setShowSideControls(
-            x <= edgeThreshold ||
-            x >= rect.width - edgeThreshold
-        );
-    }
-
-    function handleViewerPointerLeave() {
-        if (!isFullscreen) return;
-
-        setShowTopControls(false);
-        setShowBottomControls(false);
-        setShowSideControls(false);
-    }
-
-
     function back() {
         if (window.history.length > 1) {
             router.back();
@@ -688,18 +626,10 @@ export function Viewer({
         <>
             <div
                 ref={viewerRef}
-                className={[
-                    'viewer',
-                    isImmersive ? 'viewer-immersive' : '',
-                    isImmersive && showTopControls ? 'show-top-controls' : '',
-                    isImmersive && showBottomControls ? 'show-bottom-controls' : '',
-                    isImmersive && showSideControls ? 'show-side-controls' : '',
-                ].filter(Boolean).join(' ')}
+                className={`viewer ${isImmersive ? 'viewer-immersive' : ''}`}
                 role="dialog"
                 aria-modal="true"
                 aria-label={`Media viewer: ${media.file_name}`}
-                onPointerMove={handleViewerPointerMove}
-                onPointerLeave={handleViewerPointerLeave}
             >
                 <div className="viewer-main">
 
@@ -707,13 +637,15 @@ export function Viewer({
 
                         <div className="viewer-toolbar-group">
 
-                            <button
-                                className="viewer-icon"
-                                onClick={back}
-                                aria-label="Close viewer"
-                            >
-                                <Icon name="back"/>
-                            </button>
+                            {!isImmersive && (
+                                <button
+                                    className="viewer-icon"
+                                    onClick={back}
+                                    aria-label="Close viewer"
+                                >
+                                    <Icon name="back"/>
+                                </button>
+                            )}
 
                             <span className="viewer-count">
                                 {position}
@@ -802,20 +734,22 @@ export function Viewer({
                             </button>
 
 
-                            <button
-                                className="viewer-icon close-viewer"
-                                aria-label="Close"
-                                onClick={back}
-                            >
-                                <Icon name="close"/>
-                            </button>
+                            {!isImmersive && (
+                                <button
+                                    className="viewer-icon close-viewer"
+                                    aria-label="Close"
+                                    onClick={back}
+                                >
+                                    <Icon name="close"/>
+                                </button>
+                            )}
 
                         </div>
 
                     </div>
 
 
-                    {isFullscreen && (
+                    {isImmersive && (
                         <button
                             type="button"
                             className="viewer-fullscreen-exit"
@@ -841,14 +775,9 @@ export function Viewer({
                             <button
                                 className="viewer-arrow left"
                                 aria-label="Previous media"
-                                onClick={() =>
-                                    move(-1)
-                                }
+                                onClick={() => move(-1)}
                             >
-                                <Icon
-                                    name="back"
-                                    size={25}
-                                />
+                                <Icon name="back" size={25} />
                             </button>
                         )}
 
@@ -923,11 +852,14 @@ export function Viewer({
                                                 ? 'selected'
                                                 : ''
                                         }`}
-                                        onClick={() =>
-                                            openMedia(
-                                                item.media_id
-                                            )
-                                        }
+                                        onClick={(event) => {
+                                            openMedia(item.media_id);
+
+                                            if (event.detail !== 0) {
+                                                event.currentTarget.blur();
+                                            }
+
+                                        }}
                                         aria-label={`View ${item.file_name}`}
                                         aria-current={
                                             selected

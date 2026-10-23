@@ -1629,6 +1629,14 @@ textarea:focus-visible {
     transition: opacity .2s;
 }
 
+.photo-library-tile > .media-select::before {
+    content: "";
+    position: absolute;
+
+    width: 66px;
+    height: 66px;
+}
+
 .photo-library-tile:hover > .media-select,
 .photo-library-tile.selected > .media-select,
 .photo-library-tile > .media-select:focus-visible {
@@ -2063,41 +2071,87 @@ textarea:focus-visible {
 
 .viewer-arrow {
     position: absolute;
-    top: 50%;
+    top: 0;
+    bottom: 0;
     z-index: 5;
 
-    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
 
-    display: grid;
-    place-items: center;
-
-    width: 42px;
-    height: 42px;
+    width: 165px;
+    height: 100%;
 
     padding: 0;
     border: 0;
-    border-radius: 50%;
+    border-radius: 0;
 
-    background: #20282799;
+    transform: none;
+
+    background: transparent;
     color: #fff;
 
     cursor: pointer;
 
     transition:
-        background 150ms ease,
+        background 180ms ease,
         opacity 180ms ease;
 }
 
 .viewer-arrow.left {
-    left: -55px;
+    left: -64px;
+    right: auto;
 }
 
 .viewer-arrow.right {
-    right: -55px;
+    right: -64px;
+    left: auto;
 }
 
 .viewer-arrow:hover {
     background: #ffffff30;
+}
+
+.viewer-arrow.left:hover {
+    background: linear-gradient(
+        to right,
+        rgba(255, 255, 255, 0.12),
+        transparent
+    );
+}
+
+.viewer-arrow.right:hover {
+    background: linear-gradient(
+        to left,
+        rgba(255, 255, 255, 0.12),
+        transparent
+    );
+}
+
+.viewer.viewer-immersive .viewer-arrow {
+    width: 165px;
+    opacity: 0;
+
+    pointer-events: auto;
+
+    transition:
+        opacity 180ms ease,
+        background 180ms ease;
+}
+
+.viewer.viewer-immersive .viewer-arrow.left {
+    left: 0;
+    right: auto;
+}
+
+.viewer.viewer-immersive .viewer-arrow.right {
+    right: 0;
+    left: auto;
+}
+
+.viewer.viewer-immersive .viewer-arrow:hover,
+.viewer.viewer-immersive .viewer-arrow:focus-visible {
+    opacity: 1;
 }
 
 .filmstrip {
@@ -2343,40 +2397,41 @@ textarea:focus-visible {
     object-position: center;
 }
 
-.viewer-immersive .viewer-toolbar {
+.viewer.viewer-immersive .viewer-toolbar {
     position: absolute;
-
     top: 0;
     left: 0;
     right: 0;
-
     z-index: 20;
+
+    height: 64px;
 
     background: linear-gradient(
         to bottom,
-        rgba(0, 0, 0, 0.8),
+        rgba(0, 0, 0, 0.85),
         rgba(0, 0, 0, 0)
     );
 
     opacity: 0;
-    pointer-events: none;
+    pointer-events: auto;
 
     transition: opacity 180ms ease;
 }
 
-.viewer-immersive.show-top-controls .viewer-toolbar {
+
+.viewer.viewer-immersive .viewer-toolbar:hover,
+.viewer.viewer-immersive .viewer-toolbar:focus-within {
     opacity: 1;
-    pointer-events: auto;
 }
 
-.viewer-immersive .filmstrip {
+.viewer.viewer-immersive .filmstrip {
     position: absolute;
-
     bottom: 0;
     left: 0;
     right: 0;
-
     z-index: 20;
+
+    height: 114px;
 
     background: linear-gradient(
         to top,
@@ -2385,14 +2440,14 @@ textarea:focus-visible {
     );
 
     opacity: 0;
-    pointer-events: none;
+    pointer-events: auto;
 
     transition: opacity 180ms ease;
 }
 
-.viewer-immersive.show-bottom-controls .filmstrip {
+.viewer.viewer-immersive .filmstrip:hover,
+.viewer.viewer-immersive .filmstrip:focus-within {
     opacity: 1;
-    pointer-events: auto;
 }
 
 .viewer-immersive .viewer-arrow {
@@ -2414,12 +2469,14 @@ textarea:focus-visible {
 }
 
 .viewer-fullscreen-exit {
-    position: absolute;
+    position: fixed;
 
     top: 18px;
-    right: 18px;
+     left: 50%;
+    right: auto;
+    transform: translateX(-50%);
 
-    z-index: 30;
+    z-index: 1001;
 
     display: grid;
     place-items: center;
@@ -2447,7 +2504,12 @@ textarea:focus-visible {
         background 180ms ease;
 }
 
-.viewer-immersive.show-top-controls .viewer-fullscreen-exit {
+.viewer.viewer-immersive .viewer-main:has(.viewer-toolbar:hover)
+.viewer-fullscreen-exit,
+.viewer.viewer-immersive .viewer-main:has(.viewer-toolbar:focus-within)
+.viewer-fullscreen-exit,
+.viewer.viewer-immersive .viewer-fullscreen-exit:hover,
+.viewer.viewer-immersive .viewer-fullscreen-exit:focus-visible {
     opacity: 1;
     pointer-events: auto;
 }
