@@ -117,7 +117,12 @@ export function Viewer({
 
     const [shareError, setShareError] = useState('');
 
-    const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState<{
+        id: number;
+        fileName: string;
+    } | null>(null);
+
+    const deleteModalOpen = deleteTarget !== null;
 
 
     const filmstripRef = useRef<HTMLDivElement>(null);
@@ -715,7 +720,15 @@ export function Viewer({
                                 className="viewer-icon viewer-delete"
                                 aria-label="Delete media"
                                 title="Delete media"
-                                onClick={() => setDeleteModalOpen(true)}
+                                disabled={!isCurrentMedia || deleteModalOpen}
+                                onClick={() => {
+                                    if (!isCurrentMedia || deleteModalOpen) return;
+
+                                    setDeleteTarget({
+                                        id: selectedId,
+                                        fileName: media.file_name,
+                                    });
+                                }}
                             >
                                 <Icon name="trash" />
                             </button>
@@ -1034,11 +1047,15 @@ export function Viewer({
             
             <DeleteMediaModal
                 open={deleteModalOpen}
-                mediaIds={[media.media_id]}
-                onClose={() => setDeleteModalOpen(false)}
+                mediaIds={deleteTarget ? [deleteTarget.id] : []}
+                fileName={deleteTarget?.fileName}
+                onClose={() => setDeleteTarget(null)}
                 onDeleted={(confirmedIds) => {
-                    if (confirmedIds.includes(media.media_id)) {
-                        setDeleteModalOpen(false);
+                    if (
+                        deleteTarget &&
+                        confirmedIds.includes(deleteTarget.id)
+                    ) {
+                        setDeleteTarget(null);
                         back();
                     }
                 }}

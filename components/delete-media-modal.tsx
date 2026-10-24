@@ -6,6 +6,7 @@ import { BulkMediaFeedback } from "./bulk-media-feedback";
 type DeleteMediaModalProps = {
     open: boolean;
     mediaIds: number[];
+    fileName?: string;
     onClose: () => void;
     onDeleted: (confirmedIds: number[]) => void;
 };
@@ -13,6 +14,7 @@ type DeleteMediaModalProps = {
 export function DeleteMediaModal({
     open,
     mediaIds,
+    fileName,
     onClose,
     onDeleted,
 }: DeleteMediaModalProps) {
@@ -38,11 +40,9 @@ export function DeleteMediaModal({
                         <h2>Delete media?</h2>
 
                         <p>
-                            {mediaIds.length}{' '}
-                            {mediaIds.length === 1
-                                ? 'item'
-                                : 'items'}{' '}
-                            selected
+                            {mediaIds.length === 1 && fileName
+                                ? `Permanently delete "${fileName}"?`
+                                : `${mediaIds.length} ${mediaIds.length === 1 ? "item" : "items"} selected`}
                         </p>
                     </div>
 
