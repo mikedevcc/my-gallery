@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, mock } from "node:test";
+import fs from "node:fs/promises";
 import { Pool, type PoolClient } from "pg";
 import { databaseConnectionString, geocoderConfiguration, RuntimeConfigurationError } from "./runtime-config";
 import { validateRuntimeConfiguration } from "./validate-runtime-config";
@@ -24,6 +25,7 @@ const config = {
     DATABASE_URL: safeUrl, GEOCODER_MODE: "disabled", GEOCODER_URL: undefined,
     MEDIA_STORAGE_ROOT: "/srv/example-gallery", MEDIA_STORAGE_UUID: "12345678-1234-4234-8234-123456789abc",
     MEDIA_STORAGE_ID: "87654321-4321-4321-8321-cba987654321",
+    MEDIA_STORAGE_MODE: "native", MEDIA_STORAGE_ASSERTION: undefined,
 };
 test("database URL rejects missing, ambient, malformed and overriding targets without leaking secrets", () => {
     for (const value of [undefined, "", "secret-invalid-url", "postgresql://user:TOP_SECRET@host/db", "https://user:TOP_SECRET@host:5432/db", "postgresql://user:TOP_SECRET@host:5432/", `${safeUrl}?host=wrong`, `${safeUrl}#secret`, `${safeUrl}?sslmode=typo`]) {
@@ -51,14 +53,22 @@ test("startup checks configuration without any database, device or mount access"
     const connect = mock.method(Pool.prototype, "connect", () => { throw new Error("No database access allowed"); });
     const mounts = mock.method(storageSystem, "mounts", async () => { throw new Error("No storage probes allowed"); });
     const device = mock.method(storageSystem, "device", async () => { throw new Error("No device access allowed"); });
+    const read = mock.method(fs, "readFile", async () => { throw new Error("No filesystem access allowed"); });
+    const stat = mock.method(fs, "stat", async () => { throw new Error("No filesystem access allowed"); });
+    const open = mock.method(fs, "open", async () => { throw new Error("No filesystem access allowed"); });
     try {
         validateRuntimeConfiguration();
+        await environment({ MEDIA_STORAGE_MODE: "docker", MEDIA_STORAGE_ASSERTION: "/run/gallery/identity.json" }, async () => validateRuntimeConfiguration());
+        for (const values of [{ MEDIA_STORAGE_MODE: "invalid" }, { MEDIA_STORAGE_MODE: "docker", MEDIA_STORAGE_ASSERTION: undefined }, { MEDIA_STORAGE_MODE: "docker", MEDIA_STORAGE_ASSERTION: "/srv/example-gallery/assertion.json" }]) {
+            await environment(values, async () => assert.throws(validateRuntimeConfiguration, StorageUnavailableError));
+        }
+        assert.equal(read.mock.callCount(), 0); assert.equal(stat.mock.callCount(), 0); assert.equal(open.mock.callCount(), 0);
         for (const name of ["DATABASE_URL", "MEDIA_STORAGE_ROOT", "MEDIA_STORAGE_UUID", "MEDIA_STORAGE_ID"]) await environment({ [name]: undefined }, async () => assert.throws(validateRuntimeConfiguration));
         await environment({ MEDIA_STORAGE_ROOT: "/bad\npath" }, async () => assert.throws(validateRuntimeConfiguration, StorageUnavailableError));
         await environment({ MEDIA_UPLOAD_TIMEOUT_MS: "2147483648" }, async () => assert.throws(validateRuntimeConfiguration, /MEDIA_UPLOAD_TIMEOUT_MS/));
         await environment({ MEDIA_MAX_UPLOAD_BYTES: "9007199254740991", MEDIA_MAX_REQUEST_BYTES: undefined }, async () => assert.throws(processingLimits));
         assert.equal(connect.mock.callCount(), 0); assert.equal(mounts.mock.callCount(), 0); assert.equal(device.mock.callCount(), 0);
-    } finally { connect.mock.restore(); mounts.mock.restore(); device.mock.restore(); }
+    } finally { connect.mock.restore(); mounts.mock.restore(); device.mock.restore(); read.mock.restore(); stat.mock.restore(); open.mock.restore(); }
 }));
 test("database validates before checkout and refuses a changed pool target", () => environment({ DATABASE_URL: undefined }, async () => {
     let releases = 0;

@@ -12,8 +12,10 @@ export async function writeTestStorageMarker(root: string) {
 }
 
 export async function mockStorageMount(root: string) {
-    const keys = ["MEDIA_STORAGE_ROOT", "MEDIA_STORAGE_UUID", "MEDIA_STORAGE_ID"] as const;
+    const keys = ["MEDIA_STORAGE_ROOT", "MEDIA_STORAGE_UUID", "MEDIA_STORAGE_ID", "MEDIA_STORAGE_MODE", "MEDIA_STORAGE_ASSERTION"] as const;
     const previous = keys.map(key => process.env[key]);
+    process.env.MEDIA_STORAGE_MODE = "native";
+    delete process.env.MEDIA_STORAGE_ASSERTION;
     process.env.MEDIA_STORAGE_ROOT = root;
     process.env.MEDIA_STORAGE_UUID = testFilesystemUuid;
     process.env.MEDIA_STORAGE_ID = testInstallationId;

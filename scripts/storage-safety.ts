@@ -9,6 +9,7 @@ export const storageMarkerName = ".mygallery-storage.json";
 // Isolated read-only OS probes, mocked by tests. Production always reads the
 // current Linux mount table and the administrator-provisioned UUID device link.
 export const storageSystem = {
+    bootId: () => fs.readFile("/proc/sys/kernel/random/boot_id", "utf8"),
     mounts: () => fs.readFile("/proc/self/mountinfo", "utf8"),
     device: async (uuid: string) => {
         const stat = await fs.stat(`/dev/disk/by-uuid/${uuid}`, { bigint: true });
@@ -32,7 +33,13 @@ export function storageConfiguration() {
     if (!uuid || !uuidPattern.test(uuid) || !installationId || !uuidPattern.test(installationId)) {
         throw new StorageUnavailableError("MEDIA_STORAGE_UUID and MEDIA_STORAGE_ID must be explicitly configured UUIDs");
     }
-    return { root, uuid, installationId };
+    const mode = process.env.MEDIA_STORAGE_MODE ?? "native";
+    if (mode !== "native" && mode !== "docker") throw new StorageUnavailableError("MEDIA_STORAGE_MODE must be native or docker");
+    const assertionPath = process.env.MEDIA_STORAGE_ASSERTION;
+    if (mode === "docker" && (!assertionPath || !path.isAbsolute(assertionPath) || /[\u0000-\u001f\u007f]/.test(assertionPath) || inside(root, path.resolve(assertionPath)))) {
+        throw new StorageUnavailableError("Docker mode requires an absolute MEDIA_STORAGE_ASSERTION outside media storage");
+    }
+    return { root, uuid, installationId, mode, assertionPath };
 }
 
 type Mount = { id: string; target: string; filesystem: string; readOnly: boolean };
@@ -53,6 +60,27 @@ function coveringMount(entries: Mount[], target: string): Mount | undefined {
     return entries.filter(entry => inside(entry.target, target)).sort((a, b) => b.target.length - a.target.length)[0];
 }
 
+export const storageAssertionMaxAgeMs = 24 * 60 * 60 * 1000;
+
+async function dockerAssertion(config: ReturnType<typeof storageConfiguration>, entries: Mount[], device: bigint) {
+    const file = path.resolve(config.assertionPath!);
+    if (await fs.realpath(file) !== file || !coveringMount(entries, file)?.readOnly) throw new Error("Storage assertion must be on a read-only mount without symlinks");
+    const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+        const stat = await handle.stat({ bigint: true });
+        if (!stat.isFile() || stat.size > BigInt(4096)) throw new Error("Invalid storage assertion file");
+        const content = await handle.readFile("utf8");
+        const assertion = JSON.parse(content);
+        const now = Date.now();
+        if (assertion.version !== 1 || assertion.filesystemUuid !== config.uuid || assertion.installationId !== config.installationId ||
+            assertion.device !== device.toString() || assertion.bootId !== (await storageSystem.bootId()).trim() ||
+            !Number.isSafeInteger(assertion.issuedAt) || assertion.issuedAt > now || now - assertion.issuedAt >= storageAssertionMaxAgeMs) {
+            throw new Error("Storage assertion is inconsistent, expired or from another boot");
+        }
+        return content;
+    } finally { await handle.close(); }
+}
+
 async function inspect(expectedRoot: string) {
     const config = storageConfiguration();
     if (config.root !== path.resolve(expectedRoot)) throw new Error("Storage root differs from configured installation");
@@ -62,8 +90,13 @@ async function inspect(expectedRoot: string) {
     const entries = mounts(await storageSystem.mounts());
     const mount = coveringMount(entries, config.root);
     if (!mount || mount.target === "/" || mount.readOnly || !["ext4", "xfs"].includes(mount.filesystem)) throw new Error("Expected a writable, separately mounted ext4 or XFS storage volume");
-    const expected = await storageSystem.device(config.uuid);
-    if (!expected.block || stat.dev !== expected.device) throw new Error("Storage device does not match MEDIA_STORAGE_UUID");
+    let assertion: string | undefined;
+    if (config.mode === "native") {
+        const expected = await storageSystem.device(config.uuid);
+        if (!expected.block || stat.dev !== expected.device) throw new Error("Storage device does not match MEDIA_STORAGE_UUID");
+    } else {
+        assertion = await dockerAssertion(config, entries, stat.dev);
+    }
     const handle = await fs.open(path.join(config.root, storageMarkerName), constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
         const markerStat = await handle.stat({ bigint: true });
@@ -71,7 +104,7 @@ async function inspect(expectedRoot: string) {
         const marker = JSON.parse(await handle.readFile("utf8")) as { version?: number; installationId?: string; filesystemUuid?: string };
         if (marker.version !== 1 || marker.installationId !== config.installationId || marker.filesystemUuid !== config.uuid) throw new Error("Storage marker does not match this installation and filesystem");
     } finally { await handle.close(); }
-    return { ...config, device: stat.dev, inode: stat.ino, mount, entries };
+    return { ...config, assertion, device: stat.dev, inode: stat.ino, mount, entries };
 }
 
 export type ValidatedStorage = {
@@ -87,7 +120,7 @@ export async function validateStorage(root = getMediaStorageRoot()): Promise<Val
             async assertAvailable(target = initial.root) {
                 try {
                     const current = await inspect(root);
-                    if (current.device !== initial.device || current.inode !== initial.inode || current.mount.id !== initial.mount.id || current.uuid !== initial.uuid || current.installationId !== initial.installationId) throw new Error("Storage mount or installation changed during operation");
+                    if (current.mode !== initial.mode || current.assertionPath !== initial.assertionPath || current.assertion !== initial.assertion || current.device !== initial.device || current.inode !== initial.inode || current.mount.id !== initial.mount.id || current.uuid !== initial.uuid || current.installationId !== initial.installationId) throw new Error("Storage mount or installation changed during operation");
                     let candidate = path.resolve(target);
                     if (!inside(initial.root, candidate)) throw new Error("Media path is outside configured storage");
                     // Resolve the closest existing ancestor, rejecting symlink files

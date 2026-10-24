@@ -4,8 +4,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { Pool, type PoolClient } from "pg";
-import { getMediaStorageRoot, readStorageFile, storageMarkerName, StorageUnavailableError, validateStorage } from "./storage-safety";
-import { mockStorageMount, writeTestStorageMarker } from "./testing/storage-fixture";
+import { getMediaStorageRoot, readStorageFile, storageMarkerName, storageSystem, storageAssertionMaxAgeMs, StorageUnavailableError, validateStorage } from "./storage-safety";
+import { mockStorageMount, testFilesystemUuid, testInstallationId, writeTestStorageMarker } from "./testing/storage-fixture";
 import { stageMediaFile } from "./media-storage";
 import { deleteMediaAtDestination } from "./media-mutations";
 import { deleteMediaById } from "./media-database";
@@ -124,6 +124,8 @@ test("deletion never invokes metadata removal while storage is unavailable", () 
 
 test("storage loss during DELETE rolls metadata transaction back before commit and releases client", () => fixture(async (root, mount) => {
     const destination = path.join(root, "original.jpg"); await fs.writeFile(destination, "original");
+    const previousDatabaseUrl = process.env.DATABASE_URL;
+    process.env.DATABASE_URL = "postgresql://offline:unused@database.example.invalid:5432/gallery";
     const queries: string[] = []; let releases = 0;
     const checkout = mock.method(Pool.prototype, "connect", async () => ({
         query: async (text: string) => {
@@ -138,5 +140,75 @@ test("storage loss during DELETE rolls metadata transaction back before commit a
         assert.deepEqual(queries, ["BEGIN", "SET", "SELECT", "SELECT", "SELECT", "SELECT", "DELETE", "INSERT", "UPDATE", "ROLLBACK"]);
         assert.equal(releases, 1);
         assert.equal(await fs.readFile(destination, "utf8"), "original");
-    } finally { checkout.mock.restore(); }
+    } finally {
+        checkout.mock.restore();
+        if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previousDatabaseUrl;
+    }
 }));
+
+for (const mode of ["native", "docker"] as const) {
+    test(`${mode}: identity and mount continuity fail closed`, () => fixture(async (root, mount) => {
+        const assertionDirectory = await fs.mkdtemp(path.join(tmpdir(), "gallery-assertion-"));
+        const assertionPath = path.join(assertionDirectory, "identity.json");
+        const device = (await fs.stat(root, { bigint: true })).dev;
+        const assertion = { version: 1, filesystemUuid: testFilesystemUuid, installationId: testInstallationId,
+            device: device.toString(), bootId: (await storageSystem.bootId()).trim(), issuedAt: Date.now() };
+        const write = (changes = {}) => fs.writeFile(assertionPath, JSON.stringify({ ...assertion, ...changes }));
+        process.env.MEDIA_STORAGE_MODE = mode;
+        process.env.MEDIA_STORAGE_ASSERTION = assertionPath;
+        mount.state.extraMounts = `904 1 8:0 / ${assertionDirectory} ro - ext4 /dev/system ro\n`;
+        try {
+            await write();
+            const storage = await validateStorage();
+            if (mode === "docker") {
+                // Docker must never need /dev access.
+                mount.state.wrongDevice = true;
+                await validateStorage();
+
+                for (const changes of [{ device: (device + BigInt(1)).toString() }, { installationId: testFilesystemUuid },
+                    { filesystemUuid: testInstallationId }, { bootId: "previous-boot" }, { issuedAt: Date.now() - storageAssertionMaxAgeMs },
+                    { issuedAt: Date.now() + 60000 }, { issuedAt: "invalid" }, { version: 2 }]) {
+                    await write(changes);
+                    await assert.rejects(validateStorage, StorageUnavailableError);
+                }
+                await fs.writeFile(assertionPath, "invalid");
+                await assert.rejects(validateStorage, StorageUnavailableError);
+                await fs.unlink(assertionPath);
+                await assert.rejects(validateStorage, StorageUnavailableError);
+                await fs.symlink(path.join(root, storageMarkerName), assertionPath);
+                await assert.rejects(validateStorage, StorageUnavailableError);
+                await fs.unlink(assertionPath);
+                await write();
+                const originalOpen = fs.open;
+                const denied = mock.method(fs, "open", async (...args: Parameters<typeof fs.open>) => {
+                    if (String(args[0]) === assertionPath) throw Object.assign(new Error("Denied"), { code: "EACCES" });
+                    return originalOpen(...args);
+                });
+                try { await assert.rejects(validateStorage, StorageUnavailableError); }
+                finally { denied.mock.restore(); }
+                mount.state.extraMounts = "";
+                await assert.rejects(validateStorage, StorageUnavailableError);
+                mount.state.extraMounts = `904 1 8:0 / ${assertionDirectory} ro - ext4 /dev/system ro\n`;
+            } else {
+                mount.state.wrongDevice = true;
+                await assert.rejects(validateStorage, StorageUnavailableError);
+            }
+            mount.state.wrongDevice = false;
+            await fs.writeFile(path.join(root, storageMarkerName), JSON.stringify({ version: 1, installationId: testFilesystemUuid, filesystemUuid: testFilesystemUuid }));
+            await assert.rejects(() => storage.assertAvailable(), StorageUnavailableError);
+            await fs.unlink(path.join(root, storageMarkerName));
+            await writeTestStorageMarker(root);
+            mount.state.mountId = "replacement";
+            await assert.rejects(() => storage.assertAvailable(), StorageUnavailableError);
+            mount.state.mountId = "901";
+            const current = await validateStorage();
+            mount.state.mounted = false;
+            await assert.rejects(() => current.assertAvailable(), StorageUnavailableError);
+            mount.state.mounted = true;
+            const detached = `${root}-detached`;
+            await fs.rename(root, detached);
+            try { await assert.rejects(() => current.assertAvailable(), StorageUnavailableError); }
+            finally { await fs.rename(detached, root); }
+        } finally { await fs.rm(assertionDirectory, { recursive: true, force: true }); }
+    }));
+}

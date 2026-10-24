@@ -156,3 +156,111 @@ legacy-path compatibility, see [media path security](media-path-security.md).
 
 For streaming-upload limits, processing admission, temporary-storage budgets and
 Debian resource controls, see [processing limits](processing-limits.md).
+
+## Explicit Docker mode (Debian 13)
+
+Native mode remains the default (`MEDIA_STORAGE_MODE=native`) and still resolves
+`/dev/disk/by-uuid/<UUID>` on every check. Docker mode is an explicit alternative:
+
+```dotenv
+MEDIA_STORAGE_MODE=docker
+MEDIA_STORAGE_ROOT=/srv/gallery-media
+MEDIA_STORAGE_UUID=<filesystem UUID>
+MEDIA_STORAGE_ID=<installation UUID>
+MEDIA_STORAGE_ASSERTION=/run/gallery-identity/identity.json
+```
+
+The media path **inside** the container must preserve existing absolute database
+paths. Bind-mount the existing host media directory there. Docker mode requires a
+host assertion; it never attempts device discovery inside the container. All the
+normal ext4/XFS, writable media mount, symlink, marker, nested-path mount and
+operation continuity checks remain active.
+
+The host needs Python 3, util-linux `blkid`, `/proc/self/mountinfo`, UUID device
+links, and sufficient host privileges to probe the actual block device. Run
+`scripts/storage-preflight.py` on the host, never in the application container.
+It probes `blkid -p` (no UUID cache), compares the block device's `st_rdev` to the
+media root's `st_dev`, verifies the exact expected covering mountpoint and marker,
+and publishes a bounded JSON assertion with atomic rename and fsync. It creates
+neither media roots nor markers. Use canonical absolute host paths. The media
+root may be a directory below the expected mountpoint, but cannot be covered by
+another mount. The assertion directory must already exist outside that entire
+USB mount, owned by the administrator and unwritable by the application or other
+untrusted users. Serialize preflight and container lifecycle management.
+
+Example Compose service fragment (merge with the actual image, database and
+other required configuration):
+
+```yaml
+services:
+  gallery:
+    restart: "no"
+    environment:
+      MEDIA_STORAGE_MODE: docker
+      MEDIA_STORAGE_ROOT: /srv/gallery-media
+      MEDIA_STORAGE_UUID: ${MEDIA_STORAGE_UUID}
+      MEDIA_STORAGE_ID: ${MEDIA_STORAGE_ID}
+      MEDIA_STORAGE_ASSERTION: /run/gallery-identity/identity.json
+    volumes:
+      - type: bind
+        source: /srv/gallery-disk/library
+        target: /srv/gallery-media
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /run/mygallery-identity
+        target: /run/gallery-identity
+        read_only: true
+        bind:
+          create_host_path: false
+```
+
+Mount the **assertion directory**, not an individual file: atomic replacement or
+unlink must be visible in the container. The app requires a read-only covering
+mount for the assertion and rejects symlinked assertion paths. Grant the container
+user read/traverse access to this administrator-controlled directory. Do not
+mount block devices, `/dev/disk`, or the Docker socket into the container; no
+`--privileged`, `--device`, or additional device capabilities are needed.
+
+Immediately before every start/recreation, stop the existing container, invalidate
+any old assertion, run preflight, and start only on success. Example host wrapper
+body, with UUID/ID exported from the protected host configuration:
+
+```sh
+set -eu
+docker compose stop gallery
+rm -f /run/mygallery-identity/identity.json
+python3 scripts/storage-preflight.py \
+  /srv/gallery-disk /srv/gallery-disk/library \
+  "$MEDIA_STORAGE_UUID" "$MEDIA_STORAGE_ID" \
+  /run/mygallery-identity/identity.json
+docker compose up -d --force-recreate gallery
+```
+
+Provision `/run/mygallery-identity` via an administrator-managed boot unit or
+tmpfiles rule before this wrapper runs. Protect the wrapper and configuration.
+The script also unlinks its previous output before device probing; failure must
+leave the service stopped. Remove the assertion when stopping the service,
+before unmounting or replacing storage, and after failed startup. Disable direct
+Docker auto-restarts that bypass preflight; have the host supervisor invoke the
+wrapper, with mount ordering and lifecycle dependencies as described above.
+
+Assertions contain an issue timestamp and host boot ID. The app rejects malformed,
+missing, unreadable, mismatched, future-dated, previous-boot, or **24-hour-old**
+assertions on every check. Stop, reverify and recreate the container before that
+expiry (scheduled host maintenance is required for continuous service). Atomic
+assertion renewal during an active operation deliberately invalidates that
+operation's snapshot. Host and container must share the host boot ID and wall
+clock; time namespaces/virtualized `/proc` require separate review.
+
+These checks establish only that a trusted host verified identity at the recorded
+time, within a bounded wall-clock age and the same boot. A static assertion does
+**not** independently re-probe the UUID during service operation. Device numbers
+can be reused after removal, timestamps depend on a trustworthy clock, and a
+copied marker plus reused device number could satisfy a still-valid assertion
+for a newly started operation. In-progress operations also pin device, root inode,
+mount ID and assertion content, but this cannot eliminate all check/syscall races.
+The assertion is not signed; host ownership and the read-only container mount
+are the trust boundary. This is weaker than native mode's repeated direct UUID
+verification. Keep the host mount stable while running, retain unwritable fallback
+directories and unprivileged application credentials, and stop on USB loss.
