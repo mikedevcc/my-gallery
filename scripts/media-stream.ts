@@ -167,6 +167,58 @@ function fileBody(handle: FileHandle, storage: ValidatedStorage, stat: BigIntSta
     }, { highWaterMark: 0 });
 }
 
+async function waitForMediaRetry(
+    milliseconds: number,
+    signal: AbortSignal
+): Promise<void> {
+    abort(signal);
+
+    await new Promise<void>((resolve, reject) => {
+        const onAbort = () => {
+            clearTimeout(timer);
+            signal.removeEventListener("abort", onAbort);
+            reject(new DOMException("Request aborted", "AbortError"));
+        };
+
+        const timer = setTimeout(() => {
+            signal.removeEventListener("abort", onAbort);
+            resolve();
+        }, milliseconds);
+
+        signal.addEventListener("abort", onAbort, { once: true });
+
+        if (signal.aborted) onAbort();
+    });
+}
+
+async function withMediaReadRetry<T>(
+    signal: AbortSignal,
+    operation: () => Promise<T>
+): Promise<T> {
+    const retryDelays = [50, 100, 200, 400];
+
+    for (let attempt = 0; ; attempt++) {
+        abort(signal);
+
+        try {
+            return await operation();
+        } catch (error) {
+            // Only retry temporary destination-lock contention.
+            if (
+                !(error instanceof DestinationBusyError) ||
+                attempt >= retryDelays.length
+            ) {
+                throw error;
+            }
+
+            await waitForMediaRetry(
+                retryDelays[attempt],
+                signal
+            );
+        }
+    }
+}
+
 export async function streamMediaFile(request: Request, selection: MediaStreamSelection): Promise<Response> {
     if (request.method !== "GET" && request.method !== "HEAD") throw new MediaDeliveryError(405, "Method not allowed");
     abort(request.signal);
@@ -179,13 +231,25 @@ export async function streamMediaFile(request: Request, selection: MediaStreamSe
     let opened: { handle: FileHandle; stat: BigIntStats } | undefined;
     let transferred = false;
     try {
-        await withDestinationLock(storage.root, selection.destination, async lock => {
-            abort(request.signal);
-            await selection.revalidate();
-            await lock.revalidate();
-            opened = await pinFile(storage, selection.filePath);
-            abort(request.signal);
-        });
+        await withMediaReadRetry(request.signal, () =>
+            withDestinationLock(
+                storage.root,
+                selection.destination,
+                async lock => {
+                    abort(request.signal);
+
+                    await selection.revalidate();
+                    await lock.revalidate();
+
+                    opened = await pinFile(
+                        storage,
+                        selection.filePath
+                    );
+
+                    abort(request.signal);
+                }
+            )
+        );
         const { handle, stat } = opened!;
         abort(request.signal);
         const size = Number(stat.size);

@@ -245,3 +245,116 @@ test("header construction errors close descriptors, and in-place file changes te
     await fs.truncate(target, 1);
     await assert.rejects(reader.read(), /stream unavailable/); assert.equal(state.active.size, 0);
 })));
+
+test(
+    "media delivery retries after temporary destination contention",
+    () => fixture(async (root, target, selection) => {
+        const lock = await acquireDestinationLock(root, target);
+        let released = false;
+
+        try {
+            const pending = streamMediaFile(request(), selection);
+
+            await new Promise<void>(resolve =>
+                setTimeout(resolve, 100)
+            );
+
+            await lock.release();
+            released = true;
+
+            const response = await pending;
+
+            assert.equal(response.status, 200);
+            assert.equal(await response.text(), "0123456789");
+        } finally {
+            if (!released) {
+                await lock.release();
+            }
+        }
+    })
+);
+
+test(
+    "concurrent media requests succeed after destination contention",
+    () => fixture(async (root, target, selection) => {
+        const lock = await acquireDestinationLock(root, target);
+        let released = false;
+
+        try {
+            const first = streamMediaFile(request(), selection);
+            const second = streamMediaFile(request(), selection);
+
+            // Both requests initially encounter the same lock.
+            await new Promise<void>(resolve =>
+                setTimeout(resolve, 100)
+            );
+
+            await lock.release();
+            released = true;
+
+            const [firstResponse, secondResponse] =
+                await Promise.all([first, second]);
+
+            assert.equal(firstResponse.status, 200);
+            assert.equal(secondResponse.status, 200);
+
+            const [firstBody, secondBody] = await Promise.all([
+                firstResponse.text(),
+                secondResponse.text(),
+            ]);
+
+            assert.equal(firstBody, "0123456789");
+            assert.equal(secondBody, "0123456789");
+        } finally {
+            if (!released) {
+                await lock.release();
+            }
+        }
+    })
+);
+
+test(
+    "aborted media requests stop waiting for a destination lock",
+    () => fixture(async (root, target, selection) => {
+        const lock = await acquireDestinationLock(root, target);
+
+        try {
+            const controller = new AbortController();
+
+            const req = request(
+                "GET",
+                undefined,
+                controller.signal
+            );
+
+            const baseline = getEventListeners(
+                req.signal,
+                "abort"
+            ).length;
+
+            const pending = streamMediaFile(req, selection);
+
+            // Attach the rejection assertion before aborting.
+            const rejected = assert.rejects(
+                pending,
+                { name: "AbortError" }
+            );
+
+            await new Promise<void>(resolve =>
+                setTimeout(resolve, 75)
+            );
+
+            controller.abort();
+
+            await rejected;
+
+            assert.equal(
+                getEventListeners(req.signal, "abort").length,
+                baseline,
+                "Retry must remove its abort listener"
+            );
+        } finally {
+            await lock.release();
+        }
+    })
+);
