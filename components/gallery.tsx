@@ -109,6 +109,11 @@ export function Viewer({
     const [info, setInfo] = useState(false);
 
     const [favorite, setFavorite] = useState(false);
+    const selectedIdRef = useRef(selectedId);
+    const pendingFavoritesRef = useRef(new Set<number>());
+
+    const [pendingFavoriteIds, setPendingFavoriteIds] = useState<number[]>([]);
+    const [favoriteError, setFavoriteError] = useState('');
 
     const canShare = useSyncExternalStore(
         () => () => {},
@@ -348,7 +353,9 @@ export function Viewer({
         if (mediaId === selectedId) return;
 
         // Update the selected image without unmounting Viewer.
+        selectedIdRef.current = mediaId;
         setSelectedId(mediaId);
+        setFavoriteError('');
 
         // Preserve the originating collection in the URL.
         const query = new URLSearchParams();
@@ -595,15 +602,19 @@ export function Viewer({
 
 
     async function toggleViewerFavorite() {
-        if (!media) {
-            return;
-        }
+        if (!isCurrentMedia) return;
+
+        const mediaId = selectedId;
+        if (pendingFavoritesRef.current.has(mediaId)) return;
 
         const nextFavoriteState = !favorite;
 
-        const response = await fetch(
-            `/api/media/${media.media_id}`,
-            {
+        pendingFavoritesRef.current.add(mediaId);
+        setPendingFavoriteIds(ids => [...ids, mediaId]);
+        setFavoriteError('');
+
+        try {
+            const response = await fetch(`/api/media/${mediaId}`, {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
@@ -611,20 +622,27 @@ export function Viewer({
                 body: JSON.stringify({
                     favorite: nextFavoriteState,
                 }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`Favorite update failed (${response.status})`);
             }
-        );
 
-        if (!response.ok) {
-            throw new Error(
-                `Failed to toggle favorite: ${media.media_id}`
-            );
+            // An earlier image's response must not update
+            // the currently displayed image.
+            if (selectedIdRef.current === mediaId) {
+                setFavorite(nextFavoriteState);
+            }
+
+            window.dispatchEvent(new Event('media-library-updated'));
+        } catch {
+            if (selectedIdRef.current === mediaId) {
+                setFavoriteError('Could not update favorite. Please try again.');
+            }
+        } finally {
+            pendingFavoritesRef.current.delete(mediaId);
+            setPendingFavoriteIds(ids => ids.filter(id => id !== mediaId));
         }
-
-        setFavorite(nextFavoriteState);
-
-        window.dispatchEvent(
-            new Event('media-library-updated')
-        );
     }
 
 
@@ -677,12 +695,25 @@ export function Viewer({
                                         : ''
                                 }`}
                                 aria-label="Toggle favorite"
+                                disabled={
+                                    !isCurrentMedia ||
+                                    pendingFavoriteIds.includes(selectedId)
+                                }
+                                aria-pressed={isCurrentMedia ? favorite : false}
+                                title="Toggle favorite"
                                 onClick={() => {
                                     void toggleViewerFavorite();
                                 }}
                             >
                                 <Icon name="heart"/>
                             </button>
+
+
+                            {favoriteError && (
+                                <span role="alert" className="viewer-favorite-error">
+                                    {favoriteError}
+                                </span>
+                            )}
 
 
                             {canShare && (

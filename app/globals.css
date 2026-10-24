@@ -2525,6 +2525,13 @@ textarea:focus-visible {
     background: #171b1bf2;
 }
 
+.viewer-favorite-error {
+    color: #e5a3a3;
+    font-size: 12px;
+    max-width: 220px;
+}
+
+
 @media (max-width: 700px) {
     .viewer-stage {
         margin-left: 46px;

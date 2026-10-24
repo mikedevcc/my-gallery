@@ -249,3 +249,255 @@ test("deletion confirmation retains its original target during navigation", asyn
 
     expect(deletedIds).not.toContain(2);
 });
+
+test("a delayed favorite update cannot overwrite another image", async () => {
+    let resolvePatch!: (response: Response) => void;
+
+    const delayedPatch = new Promise<Response>(resolve => {
+        resolvePatch = resolve;
+    });
+
+    const patchIds: number[] = [];
+
+    const fetchMock = vi.fn(async (
+        input: RequestInfo | URL,
+        init?: RequestInit
+    ): Promise<Response> => {
+        const url = String(input);
+
+        if (url === "/api/media?scope=all") {
+            return Response.json([mediaA, mediaB]);
+        }
+
+        if (url === "/api/media/1") {
+            if (init?.method === "PATCH") {
+                patchIds.push(1);
+                return delayedPatch;
+            }
+            return Response.json(mediaA);
+        }
+
+        if (url === "/api/media/2") {
+            if (init?.method === "PATCH") {
+                patchIds.push(2);
+                return Response.json({
+                    message: "Favorite changed successfully",
+                    mediaId: 2,
+                });
+            }
+            return Response.json({
+                ...mediaB,
+                favorite: false,
+            });
+        }
+
+        throw new Error(`Unexpected request: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+        configurable: true,
+        value: vi.fn(),
+    });
+
+    render(<Viewer id="1" />);
+
+    await waitFor(() => {
+        expect(
+            (screen.getByRole("button", {
+                name: "Toggle favorite",
+            }) as HTMLButtonElement).disabled
+        ).toBe(false);
+    });
+
+    // Start favoriting image A.
+    fireEvent.click(
+        screen.getByRole("button", {
+            name: "Toggle favorite",
+        })
+    );
+
+    await waitFor(() => {
+        expect(patchIds).toEqual([1]);
+    });
+
+    // Navigate to B before A's PATCH completes.
+    fireEvent.click(
+        screen.getByRole("button", {
+            name: "Next media",
+        })
+    );
+
+    await waitFor(() => {
+        const button = screen.getByRole("button", {
+            name: "Toggle favorite",
+        });
+
+        expect(button.getAttribute("aria-pressed")).toBe("false");
+        expect((button as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    // A's request completes after B has loaded.
+    await act(async () => {
+        resolvePatch(Response.json({
+            message: "Favorite changed successfully",
+            mediaId: 1,
+        }));
+    });
+
+    // B must remain unfavorited.
+    expect(
+        screen.getByRole("button", {
+            name: "Toggle favorite",
+        }).getAttribute("aria-pressed")
+    ).toBe("false");
+
+    expect(patchIds).toEqual([1]);
+});
+
+test("rapid favorite clicks do not submit duplicate requests", async () => {
+    let resolvePatch!: (response: Response) => void;
+
+    const delayedPatch = new Promise<Response>(resolve => {
+        resolvePatch = resolve;
+    });
+
+    let patchCount = 0;
+
+    vi.stubGlobal("fetch", vi.fn(async (
+        input: RequestInfo | URL,
+        init?: RequestInit
+    ): Promise<Response> => {
+        const url = String(input);
+
+        if (url === "/api/media?scope=all") {
+            return Response.json([mediaA, mediaB]);
+        }
+
+        if (url === "/api/media/1") {
+            if (init?.method === "PATCH") {
+                patchCount++;
+                return delayedPatch;
+            }
+
+            return Response.json(mediaA);
+        }
+
+        throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+        configurable: true,
+        value: vi.fn(),
+    });
+
+    render(<Viewer id="1" />);
+
+    await waitFor(() => {
+        expect(
+            (screen.getByRole("button", {
+                name: "Toggle favorite",
+            }) as HTMLButtonElement).disabled
+        ).toBe(false);
+    });
+
+    const button = screen.getByRole("button", {
+        name: "Toggle favorite",
+    });
+
+    fireEvent.click(button);
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    expect(patchCount).toBe(1);
+
+    await act(async () => {
+        resolvePatch(Response.json({
+            message: "Favorite changed successfully",
+            mediaId: 1,
+        }));
+    });
+
+    expect(
+        screen.getByRole("button", {
+            name: "Toggle favorite",
+        }).getAttribute("aria-pressed")
+    ).toBe("true");
+});
+
+
+test("failed favorite updates display an error and allow retry", async () => {
+    let attempts = 0;
+
+    vi.stubGlobal("fetch", vi.fn(async (
+        input: RequestInfo | URL,
+        init?: RequestInit
+    ): Promise<Response> => {
+        const url = String(input);
+
+        if (url === "/api/media?scope=all") {
+            return Response.json([mediaA, mediaB]);
+        }
+
+        if (url === "/api/media/1") {
+            if (init?.method === "PATCH") {
+                attempts++;
+
+                if (attempts === 1) {
+                    return Response.json(
+                        { error: "Temporary failure" },
+                        { status: 503 }
+                    );
+                }
+
+                return Response.json({
+                    message: "Favorite changed successfully",
+                    mediaId: 1,
+                });
+            }
+
+            return Response.json(mediaA);
+        }
+
+        throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+        configurable: true,
+        value: vi.fn(),
+    });
+
+    render(<Viewer id="1" />);
+
+    const heart = () => screen.getByRole("button", {
+        name: "Toggle favorite",
+    });
+
+    await waitFor(() => {
+        expect((heart() as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    fireEvent.click(heart());
+
+    expect(
+        await screen.findByRole("alert")
+    ).toHaveProperty(
+        "textContent",
+        "Could not update favorite. Please try again."
+    );
+
+    expect(heart().getAttribute("aria-pressed")).toBe("false");
+
+    await waitFor(() => {
+        expect((heart() as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    fireEvent.click(heart());
+
+    await waitFor(() => {
+        expect(heart().getAttribute("aria-pressed")).toBe("true");
+    });
+
+    expect(attempts).toBe(2);
+});
