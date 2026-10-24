@@ -98,6 +98,7 @@ export type MediaDetailRow = {
 
     file_modified_at: Date | null;
     file_modified_timezone: string | null;
+    date_imported: Date;
 };
 
 export type AvailableMediaRow = {
