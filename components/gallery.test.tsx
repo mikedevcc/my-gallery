@@ -1,7 +1,8 @@
 
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Viewer } from "./gallery";
+import { mockDialogMethods } from "./modal-test-utils";
 
 const router = vi.hoisted(() => ({
     back: vi.fn(),
@@ -42,6 +43,10 @@ const mediaB = {
 function json(data: unknown) {
     return Response.json(data);
 }
+
+beforeEach(() => {
+    mockDialogMethods();
+});
 
 afterEach(() => {
     cleanup();
