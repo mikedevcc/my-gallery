@@ -6,9 +6,14 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from 'next/navigation';
 
-import { useBulkMedia } from "../lib/use-bulk-media";
 import { groupMediaByDate } from '@/lib/media-grouping';
 import { usePersistedGroup } from '@/hooks/use-persisted-group';
+
+import { useBulkMedia } from "../lib/use-bulk-media";
+import {
+    restoreMediaSelection,
+    saveMediaSelection,
+} from '../lib/selection-storage';
 
 import { Icon } from './icons';
 import { TripMediaPicker } from './trip-media-picker';
@@ -69,27 +74,9 @@ export function TripDetail({
     const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
 
     const [selectedMediaIds, setSelectedMediaIds] =
-        useState<number[]>(() => {
-            if (typeof window === 'undefined') {
-                return [];
-            }
-
-            const key = `trip-selection:${tripId}`;
-            const stored = sessionStorage.getItem(key);
-
-            if (!stored) {
-                return [];
-            }
-
-            sessionStorage.removeItem(key);
-
-            try {
-                return JSON.parse(stored) as number[];
-            }
-            catch {
-                return [];
-            }
-        });
+        useState<number[]>(() =>
+            restoreMediaSelection(`trip-selection:${tripId}`)
+        );
 
     const [moveModalOpen, setMoveModalOpen] = useState(false);
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -545,9 +532,9 @@ export function TripDetail({
                                         scroll={false}
                                         className="photo-tile"
                                         onClick={() => {
-                                            sessionStorage.setItem(
+                                            saveMediaSelection(
                                                 selectionStorageKey,
-                                                JSON.stringify(validSelectedMediaIds)
+                                                selectedMediaIds
                                             );
                                         }}
                                     >
