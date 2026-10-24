@@ -803,7 +803,8 @@ export async function getMediaDetailsById(
                 v.bitrate,
 
                 m.file_modified_at,
-                m.file_modified_timezone
+                m.file_modified_timezone,
+                m.date_imported
 
             FROM media m
 

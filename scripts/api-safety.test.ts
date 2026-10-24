@@ -224,3 +224,32 @@ test("a failed diagnostic sink cannot replace the safe response or expose its ex
         assert.equal(response.status, 500); noDisclosure(await response.text());
     } finally { sink.mock.restore(); }
 });
+
+test("public media preserves saved timezone and import date", () => {
+    const result = publicMedia({
+        media_id: 1,
+        file_name: "photo.jpg",
+        file_type: "IMAGE",
+        date_taken: null,
+        file_modified_at: "2026-01-01T00:30:00.000Z",
+        file_modified_timezone: "America/Los_Angeles",
+        date_imported: "2026-01-02T12:00:00.000Z",
+        path: "/private/storage/photo.jpg",
+    });
+
+    assert.equal(
+        result.file_modified_timezone,
+        "America/Los_Angeles"
+    );
+
+    assert.equal(
+        result.date_imported,
+        "2026-01-02T12:00:00.000Z"
+    );
+
+    // Internal filesystem paths must not be exposed.
+    assert.equal(
+        Object.hasOwn(result, "path"),
+        false
+    );
+});

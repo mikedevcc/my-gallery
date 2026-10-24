@@ -74,6 +74,7 @@ export type LibraryMedia = {
     capture_local?: string | null;
     capture_offset_minutes?: number | null;
     file_modified_at?: string | null;
+    file_modified_timezone?: string | null;
     date_imported: string;
     width: number | null;
     height: number | null;

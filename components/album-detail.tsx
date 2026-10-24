@@ -41,6 +41,7 @@ type AlbumMediaRow = {
     height: number | null;
     favorite: boolean;
     file_modified_at?: string | null;
+    file_modified_timezone?: string | null;
 };
 
 type AlbumResponse = {
