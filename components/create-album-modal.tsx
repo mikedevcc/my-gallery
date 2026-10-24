@@ -1,6 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useId } from 'react';
+
+import { useModalDialog } from '../lib/use-modal-dialog';
 
 type CreateAlbumModalProps = {
     open: boolean;
@@ -18,6 +20,15 @@ export function CreateAlbumModal({
     const [creating, setCreating] = useState(false);
 
     const [error, setError] = useState<string | null>(null);
+
+    const titleId = useId();
+    const descriptionId = useId();
+
+    const { dialogRef, handleCancel } = useModalDialog(
+        open,
+        creating,
+        handleClose
+    );
 
     if (!open) {
         return null;
@@ -78,20 +89,28 @@ export function CreateAlbumModal({
     }
 
     function handleClose() {
+        if (creating) return;
+
         setAlbumName('');
         setError(null);
         onClose();
     }
 
     return (
-        <div className="create-album-backdrop">
+        <dialog
+            ref={dialogRef}
+            className="create-album-backdrop"
+            aria-labelledby={titleId}
+            aria-describedby={descriptionId}
+            onCancel={handleCancel}
+        >
             <div className="create-album-modal">
 
                 <div className="create-album-header">
                     <div>
-                        <h2>Create album</h2>
+                        <h2 id={titleId}>Create album</h2>
 
-                        <p>
+                        <p id={descriptionId}>
                             Create a new collection
                             for your media.
                         </p>
@@ -139,7 +158,7 @@ export function CreateAlbumModal({
 
                     <button
                         type="button"
-                        onClick={onClose}
+                        onClick={handleClose}
                         disabled={creating}
                     >
                         Cancel
@@ -163,6 +182,6 @@ export function CreateAlbumModal({
                 </div>
 
             </div>
-        </div>
+        </dialog>
     );
 }
