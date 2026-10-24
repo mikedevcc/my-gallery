@@ -25,6 +25,7 @@ if (css) fixtureRequire.extensions[".css"] = css;
 else delete fixtureRequire.extensions[".css"];
 
 const router = { bfcacheId: "fixture", back() {}, forward() {}, refresh() {}, hmrRefresh() {}, push() {}, replace() {}, prefetch() {}, };
+const shellProps: React.ComponentProps<typeof Shell> = { appVersion: "0.1.0", children: null };
 function render(node: ReactNode, pathname = "/") {
     return renderToStaticMarkup(createElement(AppRouterContext.Provider, { value: router },
         createElement(PathnameContext.Provider, { value: pathname },
@@ -32,7 +33,7 @@ function render(node: ReactNode, pathname = "/") {
 }
 
 test("desktop and mobile navigation expose the same four real views and working upload control", () => {
-    const html = render(createElement(Shell, null, "fixture content"));
+    const html = render(createElement(Shell, shellProps, "fixture content"));
     const navs = [...html.matchAll(/<nav\b[^>]*>([\s\S]*?)<\/nav>/g)].map(match => match[1]);
     assert.equal(navs.length, 2);
     for (const nav of navs) {
@@ -48,7 +49,7 @@ test("desktop and mobile navigation expose the same four real views and working 
 
 test("collection detail routes keep their parent navigation active", () => {
     for (const [pathname, active] of [["/trips/12", "/trips"], ["/albums/34", "/albums"], ["/favorites", "/favorites"]]) {
-        const html = render(createElement(Shell, null), pathname);
+        const html = render(createElement(Shell, shellProps), pathname);
         const current = [...html.matchAll(/<a\b([^>]*aria-current="page"[^>]*)>/g)].map(match => /href="([^"]+)"/.exec(match[1])![1]);
         assert.deepEqual(current, [active, active]);
     }
@@ -76,7 +77,7 @@ test("legacy mock photo slugs and invalid IDs cannot instantiate a real Viewer o
 test("real library grids retain numeric Viewer links", () => {
     const html = render(createElement(LibraryMediaGrid, { onToggleFavorite() {}, items: [{ media_id: 42, file_name: "fixture.jpg", file_type: "IMAGE", date_taken: null,
         date_imported: "2026-01-01T00:00:00Z", width: 8, height: 8, favorite: false, city_name: null, country_name: null }] }));
-    assert.match(html, /href="\/photo\/42"/);
+    assert.deepEqual([...html.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map(match => match[1]), ["/photo/42?scope=all"]);
     assert.match(html, /\/api\/media\/42\/thumbnail/);
 });
 
@@ -86,7 +87,22 @@ function renderLoadedViewer(canShare = false) {
     const actual = React.useState;
     const media = { media_id: 42, file_name: "fixture.jpg", file_type: "IMAGE", file_size: 64,
         date_taken: null, width: 8, height: 8, favorite: false };
-    const initial = [media, [], false, null, true, false, ""];
+    // Keep the complete Viewer state fixture explicit; child hooks use their
+    // real initializers once these Viewer-only values have been consumed.
+    const initial = [
+        42,     // selectedId
+        media,
+        [],     // collectionMedia
+        false,  // loading
+        null,   // error
+        true,   // info
+        false,  // favorite
+        [],     // pendingFavoriteIds
+        "",     // favoriteError
+        "",     // shareError
+        null,   // deleteTarget
+        false,  // isImmersive
+    ];
     let index = 0;
     const state = mock.method(React, "useState", ((value: unknown) => actual(index < initial.length ? initial[index++] : value)) as typeof React.useState);
     const capability = mock.method(React, "useSyncExternalStore", () => canShare);
@@ -95,7 +111,8 @@ function renderLoadedViewer(canShare = false) {
 }
 test("loaded Viewer has functional controls without a nonpersistent description editor", () => {
     const html = renderLoadedViewer();
-    for (const label of ["Toggle favorite", "Download media", "Toggle information", "Close viewer"]) assert.ok(html.includes(label));
+    for (const label of ["Toggle favorite", "Download media", "Hide information", "Close viewer"]) assert.ok(html.includes(label), label);
+    assert.match(html, /aria-label="Hide information" aria-pressed="true"/);
     assert.match(html, /href="\/api\/media\/42\/file"/);
     for (const text of ["textarea", "photo-description", "Add a description", "Share media"]) assert.equal(html.includes(text), false, text);
     assert.ok(renderLoadedViewer(true).includes('aria-label="Share media"'));

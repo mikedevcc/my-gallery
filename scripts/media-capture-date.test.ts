@@ -55,17 +55,26 @@ for (const zone of zones) test(`calendar display does not use browser/server tim
 for (const zone of zones) test(`year/month/day grouping, midnight and missing capture dates: ${zone}`, async () => {
     const { groupMediaByDate, getMediaDate } = await import("../lib/media-grouping");
     inZone(zone, () => {
-        const explicit = { id: 1, date_taken: "2025-12-31T16:15:00.000Z", capture_local: "2026-01-01T00:15:00.000", capture_offset_minutes: 480 };
+        const explicit = { id: 1, date_taken: "2025-12-31T16:15:00.000Z", capture_local: "2026-01-01T00:15:00.000", capture_offset_minutes: 480,
+            file_modified_at: "2026-06-01T00:00:00.000Z", date_imported: "2026-07-01T00:00:00.000Z" };
         const naive = { id: 2, date_taken: null, capture_local: "2026-01-01T00:30:00.000" };
         const missing = { id: 3, date_taken: null, date_imported: "2026-05-01T00:00:00.000Z" };
         const absent = { id: 4, date_taken: null };
         const invalid = { id: 5, date_taken: "invalid" };
         const legacy = { id: 6, date_taken: "2025-12-31T23:45:00.000Z" };
-        const all = [explicit, naive, missing, absent, invalid, legacy];
-        assert.deepEqual(groupMediaByDate(all, "Years").map(([key]) => key), ["2026", "Capture date unknown", "2025"]);
-        assert.deepEqual(groupMediaByDate(all, "Months").map(([key]) => key), ["January 2026", "Capture date unknown", "December 2025"]);
-        assert.deepEqual(groupMediaByDate(all, "Days").map(([key, items]) => [key, items.map(item => item.id)]), [["1 January 2026", [1, 2]], ["Capture date unknown", [3, 4, 5]], ["31 December 2025", [6]]]);
+        const modified = { id: 7, date_taken: null, file_modified_at: "2026-01-01T00:30:00.000Z",
+            file_modified_timezone: "America/Los_Angeles", date_imported: "2026-07-01T00:00:00.000Z" };
+        const invalidModified = { id: 8, date_taken: "invalid", file_modified_at: "invalid", date_imported: missing.date_imported };
+        const all = [explicit, naive, missing, absent, invalid, legacy, modified, invalidModified];
+        assert.deepEqual(groupMediaByDate(all, "Years").map(([key]) => key), ["2026", "Date unknown", "2025"]);
+        assert.deepEqual(groupMediaByDate(all, "Months").map(([key]) => key), ["January 2026", "May 2026", "Date unknown", "December 2025"]);
+        assert.deepEqual(groupMediaByDate(all, "Days").map(([key, items]) => [key, items.map(item => item.id)]), [["1 January 2026", [1, 2]], ["1 May 2026", [3, 8]], ["Date unknown", [4, 5]], ["31 December 2025", [6, 7]]]);
         assert.deepEqual(groupMediaByDate(all, "All"), [["All", all]]);
-        assert.equal(getMediaDate(missing), undefined);
+        assert.equal(getMediaDate(explicit)?.toISOString(), explicit.capture_local + "Z");
+        assert.equal(getMediaDate(modified)?.toISOString(), modified.file_modified_at);
+        assert.equal(getMediaDate(missing)?.toISOString(), missing.date_imported);
+        assert.equal(getMediaDate(invalidModified)?.toISOString(), missing.date_imported);
+        assert.equal(getMediaDate(absent), undefined);
+        assert.equal(getMediaDate(invalid), undefined);
     });
 });

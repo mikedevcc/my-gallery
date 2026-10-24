@@ -113,7 +113,16 @@ for (const kind of ["delete", "album-add", "album-remove", "trip-remove"] as con
 for (const code of [400, 401, 403, 404, 409, 413, 415, 422, 408, 429, 500, 502, 503, 504]) test(`HTTP ${code} classifies rejection versus uncertain commit without exposing server errors`, async () => {
     const fetch = mock.method(globalThis, "fetch", async () => Response.json({ error: "/private/password" }, { status: code }));
     try {
-        assert.deepEqual(await requestBulkItem({ kind: "delete" }, 1), { id: 1, outcome: code === 408 || code === 429 || code >= 500 ? "uncertain" : "failed" });
+        const isUncertain = code === 408 || code === 429 || code >= 500;
+        const result = await requestBulkItem({ kind: "delete" }, 1);
+        assert.deepEqual(result, {
+            id: 1,
+            outcome: isUncertain ? "uncertain" : "failed",
+            reason: isUncertain ? undefined : code === 404
+                ? "Media or destination was not found."
+                : "Operation was rejected.",
+        });
+        assert.doesNotMatch(JSON.stringify(result), /\/private\/password/);
     } finally { fetch.mock.restore(); }
 });
 
@@ -124,13 +133,19 @@ test("network failures, unexpected success DTOs and invalid JSON remain uncertai
     }
 });
 
-test("already-present album members are confirmed unchanged and feedback reports every outcome", async () => {
+test("already-present album members are confirmed unchanged and feedback distinguishes failures from uncertainty", async () => {
     const fetch = mock.method(globalThis, "fetch", async () => Response.json({ addedCount: 0 }));
     try {
         const unchanged = await requestBulkItem({ kind: "album-add", collectionId: 1 }, 1);
         assert.deepEqual(unchanged, { ...confirmed(1), unchanged: true });
         const html = renderToStaticMarkup(createElement(BulkMediaFeedback, { items: [unchanged, failed(2), uncertain(3), { id: 4, outcome: "pending" }] }));
-        for (const text of ["1 confirmed successful", "1 already in Album", "1 failed", "1 uncertain", "1 not attempted", "Rejected IDs: 2", "Uncertain IDs: 3", "blocked from retry"]) assert.ok(html.includes(text));
+        assert.match(html, /role="alert"/);
+        assert.match(html, /1 media item failed\. Please review and retry\./);
+        assert.match(html, /class="bulk-feedback-error"><p>[^<]*<\/p><ul><li>Media #2<\/li><\/ul>/);
+        assert.match(html, /class="bulk-feedback-warning"><p>[^<]*<\/p><ul><li>Media #3<\/li><\/ul>/);
+        assert.match(html, /1 operation has an uncertain result\.\s*Do not retry until verified\./);
+        assert.doesNotMatch(html, /Media #(?:1|4)\b/);
+        assert.equal(renderToStaticMarkup(createElement(BulkMediaFeedback, { items: [unchanged] })), "");
     } finally { fetch.mock.restore(); }
 });
 
