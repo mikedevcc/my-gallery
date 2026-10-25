@@ -32,10 +32,11 @@ ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0
 
-# Native media metadata extraction.
+# Media metadata, video processing and HTTPS support.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libimage-exiftool-perl \
+        ffmpeg \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
