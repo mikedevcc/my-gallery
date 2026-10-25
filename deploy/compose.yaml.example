@@ -1,0 +1,52 @@
+# Example only. Do not deploy unchanged. Copy into a root-controlled path and
+# adapt approved storage mount, installation identity, credentials and users.
+name: my-gallery
+services:
+  db:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    env_file:
+      - /etc/mygallery/postgres.env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gallery_admin -d gallery"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+
+  gallery:
+    image: my-gallery:local-test # Replace with an approved pinned release tag
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - /etc/mygallery/app.env
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - type: bind
+        source: /srv/gallery-usb/my-gallery-nas # Example host mount; verify identity
+        target: /srv/gallery-media
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /run/mygallery-identity
+        target: /run/gallery-identity
+        read_only: true
+        bind:
+          create_host_path: false
+    networks: [backend]
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres_data:
+networks:
+  backend:
+    driver: bridge
